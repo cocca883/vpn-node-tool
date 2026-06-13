@@ -19,10 +19,11 @@ interface UserInfo {
 interface Stats {
   totalUsers: number;
   totalNodes: number;
-  activeUsers: number;
-  bannedUsers: number;
   protocolDistribution: { protocol: string; count: number }[];
-  recentNodes: { id: number; node_name: string; protocol: string; created_at: string }[];
+  regionDistribution: { region: string; count: number }[];
+  expiredNodes: number;
+  activeNodes: number;
+  noExpiryNodes: number;
 }
 
 interface ConfigItem {
@@ -94,7 +95,17 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin/stats', { headers: { 'x-session': session } });
       const d = await r.json();
-      if (d.success) setStats(d.data);
+      if (d.success) {
+        const data = d.data;
+        // Convert object distributions to arrays
+        if (data.protocolDistribution && !Array.isArray(data.protocolDistribution)) {
+          data.protocolDistribution = Object.entries(data.protocolDistribution).map(([protocol, count]) => ({ protocol, count: count as number }));
+        }
+        if (data.regionDistribution && !Array.isArray(data.regionDistribution)) {
+          data.regionDistribution = Object.entries(data.regionDistribution).map(([region, count]) => ({ region, count: count as number }));
+        }
+        setStats(data);
+      }
     } finally { setDataLoading(false); }
   }, [session]);
 
@@ -220,10 +231,10 @@ export default function AdminPage() {
           {/* Stat cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: '总用户数', value: stats.totalUsers, color: 'text-cyan-400' },
-              { label: '活跃用户', value: stats.activeUsers, color: 'text-emerald-400' },
-              { label: '总节点数', value: stats.totalNodes, color: 'text-blue-400' },
-              { label: '封禁用户', value: stats.bannedUsers, color: 'text-red-400' },
+              { label: '总节点数', value: stats.totalNodes, color: 'text-cyan-400' },
+              { label: '总用户数', value: stats.totalUsers, color: 'text-blue-400' },
+              { label: '有效节点', value: stats.activeNodes, color: 'text-emerald-400' },
+              { label: '已过期节点', value: stats.expiredNodes, color: 'text-red-400' },
             ].map(s => (
               <div
                 key={s.label}
@@ -233,6 +244,25 @@ export default function AdminPage() {
                 <div className={`text-3xl font-bold ${s.color}`}>{s.value}</div>
               </div>
             ))}
+          </div>
+
+          {/* Expiry summary */}
+          <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-cyan-500/10 p-6">
+            <h3 className="text-lg font-semibold text-slate-200 mb-4">节点有效期状态</h3>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="text-center p-4 bg-emerald-500/5 rounded-lg border border-emerald-500/10">
+                <div className="text-2xl font-bold text-emerald-400">{stats.activeNodes}</div>
+                <div className="text-sm text-slate-400 mt-1">有效</div>
+              </div>
+              <div className="text-center p-4 bg-red-500/5 rounded-lg border border-red-500/10">
+                <div className="text-2xl font-bold text-red-400">{stats.expiredNodes}</div>
+                <div className="text-sm text-slate-400 mt-1">已过期</div>
+              </div>
+              <div className="text-center p-4 bg-slate-500/5 rounded-lg border border-slate-500/10">
+                <div className="text-2xl font-bold text-slate-400">{stats.noExpiryNodes}</div>
+                <div className="text-sm text-slate-400 mt-1">未设置过期</div>
+              </div>
+            </div>
           </div>
 
           {/* Protocol distribution */}
@@ -264,37 +294,31 @@ export default function AdminPage() {
             )}
           </div>
 
-          {/* Recent nodes */}
+          {/* Region distribution */}
           <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-cyan-500/10 p-6">
-            <h3 className="text-lg font-semibold text-slate-200 mb-4">最近添加的节点</h3>
-            {stats.recentNodes.length === 0 ? (
+            <h3 className="text-lg font-semibold text-slate-200 mb-4">地区分布</h3>
+            {stats.regionDistribution.length === 0 ? (
               <p className="text-slate-500 text-sm">暂无数据</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-slate-400 border-b border-slate-700">
-                      <th className="text-left py-2 px-3">ID</th>
-                      <th className="text-left py-2 px-3">节点名称</th>
-                      <th className="text-left py-2 px-3">协议</th>
-                      <th className="text-left py-2 px-3">创建时间</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stats.recentNodes.map(n => (
-                      <tr key={n.id} className="border-b border-slate-800 hover:bg-slate-800/30">
-                        <td className="py-2 px-3 text-slate-400">{n.id}</td>
-                        <td className="py-2 px-3 font-mono">{n.node_name}</td>
-                        <td className="py-2 px-3">
-                          <span className={`px-2 py-0.5 rounded text-xs ${protocolColors[n.protocol] || ''}`}>
-                            {n.protocol}
-                          </span>
-                        </td>
-                        <td className="py-2 px-3 text-slate-400">{new Date(n.created_at).toLocaleString('zh-CN')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="space-y-3">
+                {stats.regionDistribution.map(r => {
+                  const maxCount = Math.max(...stats.regionDistribution.map(x => x.count), 1);
+                  const pct = (r.count / maxCount) * 100;
+                  return (
+                    <div key={r.region} className="flex items-center gap-3">
+                      <span className="px-2 py-0.5 rounded text-xs font-mono bg-amber-500/20 text-amber-400">
+                        {r.region}
+                      </span>
+                      <div className="flex-1 h-6 bg-slate-900/50 rounded overflow-hidden">
+                        <div
+                          className="h-full bg-amber-500/20 rounded transition-all"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="text-sm text-slate-300 w-12 text-right">{r.count}</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
