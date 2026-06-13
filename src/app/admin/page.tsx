@@ -9,11 +9,11 @@ import { getSupabaseBrowserClientAsync } from '@/lib/supabase-browser';
 interface UserInfo {
   id: string;
   email: string;
-  created_at: string;
-  last_sign_in_at: string | null;
+  createdAt: string;
+  lastSignIn: string | null;
   banned: boolean;
-  node_count: number;
-  is_admin: boolean;
+  nodeCount: number;
+  isAdmin: boolean;
 }
 
 interface Stats {
@@ -137,7 +137,7 @@ export default function AdminPage() {
   /* ── Actions ── */
   const toggleBan = async (userId: string, banned: boolean) => {
     const r = await fetch(`/api/admin/users/${userId}`, {
-      method: 'PATCH',
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'x-session': session },
       body: JSON.stringify({ action: banned ? 'unban' : 'ban' }),
     });
@@ -148,7 +148,7 @@ export default function AdminPage() {
 
   const toggleAdmin = async (userId: string, isCurrentlyAdmin: boolean) => {
     const r = await fetch(`/api/admin/users/${userId}`, {
-      method: 'PATCH',
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'x-session': session },
       body: JSON.stringify({ action: isCurrentlyAdmin ? 'remove_admin' : 'add_admin' }),
     });
@@ -361,20 +361,20 @@ export default function AdminPage() {
                     <tr key={u.id} className="border-b border-slate-800 hover:bg-slate-800/30">
                       <td className="py-3 px-4 font-mono text-sm">{u.email}</td>
                       <td className="py-3 px-4 text-slate-400 text-xs">
-                        {new Date(u.created_at).toLocaleString('zh-CN')}
+                        {new Date(u.createdAt).toLocaleString('zh-CN')}
                       </td>
                       <td className="py-3 px-4 text-slate-400 text-xs">
-                        {u.last_sign_in_at
-                          ? new Date(u.last_sign_in_at).toLocaleString('zh-CN')
+                        {u.lastSignIn
+                          ? new Date(u.lastSignIn).toLocaleString('zh-CN')
                           : '-'}
                       </td>
                       <td className="py-3 px-4">
                         <span className="bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded text-xs">
-                          {u.node_count}
+                          {u.nodeCount}
                         </span>
                       </td>
                       <td className="py-3 px-4">
-                        {u.is_admin ? (
+                        {u.isAdmin ? (
                           <span className="bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded text-xs">
                             管理员
                           </span>
@@ -408,14 +408,14 @@ export default function AdminPage() {
                             {u.banned ? '解封' : '封禁'}
                           </button>
                           <button
-                            onClick={() => toggleAdmin(u.id, u.is_admin)}
+                            onClick={() => toggleAdmin(u.id, u.isAdmin)}
                             className={`px-2 py-1 rounded text-xs transition-colors ${
-                              u.is_admin
+                              u.isAdmin
                                 ? 'bg-slate-600/20 text-slate-400 hover:bg-slate-600/30'
                                 : 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
                             }`}
                           >
-                            {u.is_admin ? '移除管理员' : '设为管理员'}
+                            {u.isAdmin ? '移除管理员' : '设为管理员'}
                           </button>
                         </div>
                       </td>
