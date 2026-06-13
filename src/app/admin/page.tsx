@@ -114,7 +114,16 @@ export default function AdminPage() {
     try {
       const r = await fetch('/api/admin/config', { headers: { 'x-session': session } });
       const d = await r.json();
-      if (d.success) setConfigs(d.data);
+      if (d.success) {
+        // API returns object { key: {value, description} }, convert to array
+        const obj = d.data as Record<string, { value: string; description: string }>;
+        const arr: ConfigItem[] = Object.entries(obj).map(([key, val]) => ({
+          key,
+          value: val.value,
+          description: val.description,
+        }));
+        setConfigs(arr);
+      }
     } finally { setDataLoading(false); }
   }, [session]);
 
@@ -152,7 +161,7 @@ export default function AdminPage() {
     const r = await fetch('/api/admin/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'x-session': session },
-      body: JSON.stringify({ key, value }),
+      body: JSON.stringify({ configs: { [key]: value } }),
     });
     const d = await r.json();
     if (d.success) {
