@@ -99,7 +99,7 @@ function SortableRow({
 
   const now = new Date();
   const isExpired = node.expiry_date && new Date(node.expiry_date) < now;
-  const isExpiringSoon = !isExpired && node.expiry_date && (new Date(node.expiry_date).getTime() - now.getTime()) < 2 * 24 * 60 * 60 * 1000;
+  const isExpiringSoon = !isExpired && node.expiry_date && (new Date(node.expiry_date).getTime() - now.getTime()) < 7 * 24 * 60 * 60 * 1000;
 
   return (
     <tr
