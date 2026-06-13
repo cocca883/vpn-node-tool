@@ -159,6 +159,17 @@ export default function AdminPage() {
     else alert(d.error || '操作失败');
   };
 
+  const deleteUser = async (userId: string, email: string) => {
+    if (!confirm(`确定要删除用户 "${email}" 吗？该操作将同时删除其所有节点数据，且不可恢复。`)) return;
+    const r = await fetch(`/api/admin/users/${userId}`, {
+      method: 'DELETE',
+      headers: { 'x-session': session },
+    });
+    const d = await r.json();
+    if (d.success) fetchUsers();
+    else alert(d.error || '删除失败');
+  };
+
   const saveConfig = async (key: string, value: string) => {
     const r = await fetch('/api/admin/config', {
       method: 'PUT',
@@ -424,6 +435,17 @@ export default function AdminPage() {
                             }`}
                           >
                             {u.isAdmin ? '移除管理员' : '设为管理员'}
+                          </button>
+                          <button
+                            onClick={() => deleteUser(u.id, u.email)}
+                            disabled={u.email === SUPER_ADMIN_EMAIL}
+                            className={`px-2 py-1 rounded text-xs transition-colors ${
+                              u.email === SUPER_ADMIN_EMAIL
+                                ? 'bg-slate-800/30 text-slate-600 cursor-not-allowed'
+                                : 'bg-red-900/20 text-red-500 hover:bg-red-900/30'
+                            }`}
+                          >
+                            删除
                           </button>
                         </div>
                       </td>
