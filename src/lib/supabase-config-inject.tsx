@@ -35,47 +35,52 @@ export function SupabaseConfigProvider({ children }: SupabaseConfigProviderProps
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/supabase-config')
-      .then((res) => {
+    let retries = 0;
+    const maxRetries = 3;
+
+    async function loadConfig(): Promise<void> {
+      try {
+        const res = await fetch('/api/supabase-config');
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
-        return res.json();
-      })
-      .then((data) => {
+        const data = await res.json();
         if (data.url && data.anonKey) {
           setConfig(data);
           (window as unknown as { __SUPABASE_CONFIG__: SupabaseConfig }).__SUPABASE_CONFIG__ = data;
           window.dispatchEvent(new CustomEvent(SUPABASE_CONFIG_READY_EVENT, { detail: data }));
+          setError(null);
         } else {
           throw new Error('Invalid config response');
         }
-      })
-      .catch((err) => {
-        setError(err.message);
-        console.error('Failed to load Supabase config:', err);
-      })
-      .finally(() => {
-        setIsLoading(false);
-      });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        retries++;
+        if (retries < maxRetries) {
+          setTimeout(loadConfig, 1000 * retries);
+        } else {
+          setError(message);
+          console.error('Failed to load Supabase config after retries:', message);
+        }
+      } finally {
+        if (retries >= maxRetries || config !== null) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadConfig();
   }, []);
+
+  useEffect(() => {
+    if (config || error) {
+      setIsLoading(false);
+    }
+  }, [config, error]);
 
   return (
     <SupabaseConfigContext.Provider value={{ config, isLoading, error }}>
       {children}
     </SupabaseConfigContext.Provider>
   );
-}
-
-export function SupabaseConfigInjector() {
-  return (
-    <SupabaseConfigProvider>
-      <ConfigInjectorInner />
-    </SupabaseConfigProvider>
-  );
-}
-
-function ConfigInjectorInner() {
-  useSupabaseConfig();
-  return null;
 }

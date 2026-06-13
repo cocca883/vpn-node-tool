@@ -176,24 +176,35 @@ export default function HomePage() {
   useEffect(() => {
     let sub: { unsubscribe: () => void } | null = null;
 
-    getSupabaseBrowserClientAsync().then((supabase) => {
-      supabase.auth.getSession().then(({ data: { session: s } }) => {
-        setSession(s);
-        setUser(s?.user ?? null);
+    getSupabaseBrowserClientAsync()
+      .then((supabase) => {
+        supabase.auth.getSession().then(({ data: { session: s } }) => {
+          setSession(s);
+          setUser(s?.user ?? null);
+          setAuthLoading(false);
+        });
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(
+          (_event: string, s: Session | null) => {
+            setSession(s);
+            setUser(s?.user ?? null);
+          }
+        );
+        sub = subscription;
+      })
+      .catch(() => {
+        // Config load failed - allow page to show error state
         setAuthLoading(false);
       });
 
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(
-        (_event: string, s: Session | null) => {
-          setSession(s);
-          setUser(s?.user ?? null);
-        }
-      );
-      sub = subscription;
-    });
+    // Safety timeout: don't stay in loading forever
+    const timeout = setTimeout(() => {
+      setAuthLoading(false);
+    }, 10000);
 
     return () => {
       sub?.unsubscribe();
+      clearTimeout(timeout);
     };
   }, []);
 
