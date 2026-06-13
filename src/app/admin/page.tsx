@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSupabaseConfig } from '@/lib/supabase-config-inject';
+import { getSupabaseBrowserClientAsync } from '@/lib/supabase-browser';
 
 /* ── Types ── */
 interface UserInfo {
@@ -50,23 +51,32 @@ export default function AdminPage() {
   /* ── Auth check ── */
   useEffect(() => {
     if (configLoading) return;
-    const token = localStorage.getItem('supabase_session');
-    if (!token) {
-      router.push('/login');
-      return;
-    }
-    setSession(token);
-    fetch('/api/admin/check', { headers: { 'x-session': token } })
-      .then(r => r.json())
-      .then(d => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const supabase = await getSupabaseBrowserClientAsync();
+        const { data: { session: sbSession } } = await supabase.auth.getSession();
+        if (!sbSession?.access_token || cancelled) {
+          if (!cancelled) router.push('/login');
+          return;
+        }
+        const token = sbSession.access_token;
+        setSession(token);
+        const r = await fetch('/api/admin/check', { headers: { 'x-session': token } });
+        const d = await r.json();
+        if (cancelled) return;
         if (d.isAdmin) {
           setIsAdmin(true);
         } else {
           router.push('/');
         }
-      })
-      .catch(() => router.push('/login'))
-      .finally(() => setAuthLoading(false));
+      } catch {
+        if (!cancelled) router.push('/login');
+      } finally {
+        if (!cancelled) setAuthLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [configLoading, config, router]);
 
   /* ── Fetch data ── */
