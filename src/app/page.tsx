@@ -469,7 +469,7 @@ export default function HomePage() {
                 <textarea
                   value={smartImportText}
                   onChange={(e) => setSmartImportText(e.target.value)}
-                  placeholder={"粘贴节点数据，每行一条，支持以下格式：\n\n1. URI格式：socks5://user:pass@1.2.3.4:1080#名称\n2. 竖线分隔：socks5|1.2.3.4|1080|user|pass|名称|地区\n3. 斜杠分隔：socks5/1.2.3.4/1080/user/pass/名称/地区"}
+                  placeholder={"粘贴节点数据，每行一条，支持以下格式：\n\n1. URI格式：socks5://user:pass@1.2.3.4:1080#名称\n2. 竖线分隔：socks5|1.2.3.4|1080|user|pass|到期|名称\n3. 斜杠分隔：socks5/1.2.3.4/1080/user/pass/到期/名称"}
                   className="w-full h-40 bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm font-mono text-slate-200 placeholder-slate-600 focus:border-cyan-600 focus:outline-none resize-none"
                 />
                 <button

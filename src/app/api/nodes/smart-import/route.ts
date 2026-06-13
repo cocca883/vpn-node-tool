@@ -202,10 +202,10 @@ function parseDelimited(line: string, delimiter: string): ParsedNode | null {
 
   const account = remaining.length > 2 ? remaining[2] : '';
   const password = remaining.length > 3 ? remaining[3] : '';
-  const nodeName = remaining.length > 4 ? remaining[4] : `${protocol}-${address}`;
-  const region = remaining.length > 5 ? remaining[5] : '';
-  const encryption = remaining.length > 6 ? remaining[6] : '';
-  const expiryDate = remaining.length > 7 ? remaining[7] : '';
+  const expiryDate = remaining.length > 4 ? remaining[4] : '';
+  const nodeName = remaining.length > 5 ? remaining[5] : `${protocol}-${address}`;
+  const region = remaining.length > 6 ? remaining[6] : '';
+  const encryption = remaining.length > 7 ? remaining[7] : '';
 
   return {
     protocol,
