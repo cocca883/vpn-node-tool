@@ -160,6 +160,7 @@ export default function HomePage() {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [nodes, setNodes] = useState<VpnNode[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [form, setForm] = useState<NodeForm>(initialForm);
@@ -182,12 +183,28 @@ export default function HomePage() {
           setSession(s);
           setUser(s?.user ?? null);
           setAuthLoading(false);
+          // Check admin status
+          if (s?.access_token) {
+            fetch('/api/admin/check', { headers: { 'x-session': s.access_token } })
+              .then(r => r.json())
+              .then(d => setIsAdmin(d.isAdmin === true))
+              .catch(() => setIsAdmin(false));
+          }
         });
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
           (_event: string, s: Session | null) => {
             setSession(s);
             setUser(s?.user ?? null);
+            // Re-check admin on auth change
+            if (s?.access_token) {
+              fetch('/api/admin/check', { headers: { 'x-session': s.access_token } })
+                .then(r => r.json())
+                .then(d => setIsAdmin(d.isAdmin === true))
+                .catch(() => setIsAdmin(false));
+            } else {
+              setIsAdmin(false);
+            }
           }
         );
         sub = subscription;
@@ -435,9 +452,11 @@ export default function HomePage() {
           </div>
           <div className="flex items-center gap-4 text-sm text-slate-400">
             <span>{user.email}</span>
-            <a href="/admin" className="px-3 py-1 rounded border border-cyan-900/40 text-cyan-400 hover:bg-cyan-950/40 transition-colors text-xs">
-              后台管理
-            </a>
+            {isAdmin && (
+              <a href="/admin" className="px-3 py-1 rounded border border-cyan-900/40 text-cyan-400 hover:bg-cyan-950/40 transition-colors text-xs">
+                后台管理
+              </a>
+            )}
             <button
               onClick={handleLogout}
               className="px-3 py-1 rounded border border-cyan-900/40 text-cyan-400 hover:bg-cyan-950/40 transition-colors text-xs"

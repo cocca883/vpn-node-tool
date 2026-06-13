@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminUser } from '@/lib/auth-helper';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 
+const SUPER_ADMIN_EMAIL = 'zhangyg10@163.com';
+
 // PUT /api/admin/users/[id] - Toggle user banned status or admin role
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { isAdmin: isReqAdmin, error, status } = await getAdminUser(req);
+  const { isAdmin: isReqAdmin, error, status, user: reqUser } = await getAdminUser(req);
   if (!isReqAdmin) {
     return NextResponse.json({ error: error || '无管理员权限' }, { status });
   }
@@ -19,7 +21,19 @@ export async function PUT(
 
     const serviceClient = getSupabaseClient();
 
+    // Check if target is super admin
+    const { data: targetAdmin } = await serviceClient
+      .from('admin_users')
+      .select('email')
+      .eq('user_id', id)
+      .single();
+
+    const isTargetSuperAdmin = targetAdmin?.email === SUPER_ADMIN_EMAIL;
+
     if (action === 'ban' || action === 'unban') {
+      if (isTargetSuperAdmin) {
+        return NextResponse.json({ error: '不能对总管理员执行此操作' }, { status: 403 });
+      }
       const banned = action === 'ban';
       const { error: upsertError } = await serviceClient
         .from('user_profiles')
@@ -60,6 +74,9 @@ export async function PUT(
     }
 
     if (action === 'remove_admin') {
+      if (isTargetSuperAdmin) {
+        return NextResponse.json({ error: '不能移除总管理员权限' }, { status: 403 });
+      }
       const { error: deleteError } = await serviceClient
         .from('admin_users')
         .delete()
@@ -77,12 +94,4 @@ export async function PUT(
     const message = err instanceof Error ? err.message : '服务器错误';
     return NextResponse.json({ error: message }, { status: 500 });
   }
-}
-
-// PATCH - same as PUT for compatibility
-export async function PATCH(
-  req: NextRequest,
-  ctx: { params: Promise<{ id: string }> }
-) {
-  return PUT(req, ctx);
 }

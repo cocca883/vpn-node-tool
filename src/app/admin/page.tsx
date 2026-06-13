@@ -34,6 +34,8 @@ interface ConfigItem {
 
 type TabKey = 'users' | 'stats' | 'config';
 
+const SUPER_ADMIN_EMAIL = 'zhangyg10@163.com';
+
 export default function AdminPage() {
   const router = useRouter();
   const { config, isLoading: configLoading } = useSupabaseConfig();
@@ -375,8 +377,8 @@ export default function AdminPage() {
                       </td>
                       <td className="py-3 px-4">
                         {u.isAdmin ? (
-                          <span className="bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded text-xs">
-                            管理员
+                          <span className={`px-2 py-0.5 rounded text-xs ${u.email === SUPER_ADMIN_EMAIL ? 'bg-amber-500/30 text-amber-300' : 'bg-amber-500/20 text-amber-400'}`}>
+                            {u.email === SUPER_ADMIN_EMAIL ? '总管理员' : '管理员'}
                           </span>
                         ) : (
                           <span className="bg-slate-600/20 text-slate-400 px-2 py-0.5 rounded text-xs">
@@ -399,20 +401,26 @@ export default function AdminPage() {
                         <div className="flex gap-2">
                           <button
                             onClick={() => toggleBan(u.id, u.banned)}
+                            disabled={u.email === SUPER_ADMIN_EMAIL}
                             className={`px-2 py-1 rounded text-xs transition-colors ${
-                              u.banned
-                                ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
-                                : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                              u.email === SUPER_ADMIN_EMAIL
+                                ? 'bg-slate-800/30 text-slate-600 cursor-not-allowed'
+                                : u.banned
+                                  ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                                  : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
                             }`}
                           >
                             {u.banned ? '解封' : '封禁'}
                           </button>
                           <button
                             onClick={() => toggleAdmin(u.id, u.isAdmin)}
+                            disabled={u.email === SUPER_ADMIN_EMAIL}
                             className={`px-2 py-1 rounded text-xs transition-colors ${
-                              u.isAdmin
-                                ? 'bg-slate-600/20 text-slate-400 hover:bg-slate-600/30'
-                                : 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
+                              u.email === SUPER_ADMIN_EMAIL
+                                ? 'bg-slate-800/30 text-slate-600 cursor-not-allowed'
+                                : u.isAdmin
+                                  ? 'bg-slate-600/20 text-slate-400 hover:bg-slate-600/30'
+                                  : 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
                             }`}
                           >
                             {u.isAdmin ? '移除管理员' : '设为管理员'}
