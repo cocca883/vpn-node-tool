@@ -1,5 +1,8 @@
 # 项目上下文
 
+## 项目简介
+VPN 节点配置工具 - 输入节点信息，自动生成协议链接（SS/VMess/VLESS/Trojan），Base64 编码后保存为订阅文件，并生成可扫描的二维码。
+
 ### 版本技术栈
 
 - **Framework**: Next.js 16 (App Router)
@@ -7,59 +10,79 @@
 - **Language**: TypeScript 5
 - **UI 组件**: shadcn/ui (基于 Radix UI)
 - **Styling**: Tailwind CSS 4
+- **QR 码**: qrcode.react
 
 ## 目录结构
 
 ```
-├── public/                 # 静态资源
+├── public/
+│   └── subscriptions/      # 生成的订阅文件存储目录（开发环境）
 ├── scripts/                # 构建与启动脚本
-│   ├── build.sh            # 构建脚本
-│   ├── dev.sh              # 开发环境启动脚本
-│   ├── prepare.sh          # 预处理脚本
-│   └── start.sh            # 生产环境启动脚本
 ├── src/
-│   ├── app/                # 页面路由与布局
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── generate/route.ts          # 生成节点链接 + Base64编码 + 保存文件
+│   │   │   └── subscription/[filename]/route.ts  # 订阅文件读取接口（生产环境）
+│   │   ├── globals.css
+│   │   ├── layout.tsx
+│   │   └── page.tsx                       # 主页面（表单 + 结果展示 + 二维码）
 │   ├── components/ui/      # Shadcn UI 组件库
-│   ├── hooks/              # 自定义 Hooks
-│   ├── lib/                # 工具库
-│   │   └── utils.ts        # 通用工具函数 (cn)
-│   └── server.ts           # 自定义服务端入口
-├── next.config.ts          # Next.js 配置
-├── package.json            # 项目依赖管理
-└── tsconfig.json           # TypeScript 配置
+│   ├── hooks/
+│   └── lib/
+├── next.config.ts
+├── package.json
+└── tsconfig.json
 ```
 
-- 项目文件（如 app 目录、pages 目录、components 等）默认初始化到 `src/` 目录下。
+## 核心功能模块
+
+### 1. 节点配置表单 (`src/app/page.tsx`)
+- 支持多节点添加/删除
+- 支持 4 种协议：Shadowsocks、VMess、VLESS、Trojan
+- 每种协议动态展示对应字段（如 VMess 的 AlterID，SS 的加密方式）
+- 高级设置折叠面板（加密方式、传输协议、TLS、SNI、Path、Host）
+
+### 2. 生成 API (`src/app/api/generate/route.ts`)
+- 接收节点数组，按协议拼接 URI 字符串
+- 多节点用换行符连接后 Base64 编码
+- 编码结果写入静态文件
+- 开发环境：写入 `public/subscriptions/` 目录，通过 `/subscriptions/xxx.txt` 直接访问
+- 生产环境：写入 `/tmp/subscriptions/` 目录，通过 `/api/subscription/xxx` API 路由读取
+- 返回文件路径用于二维码生成
+
+### 3. 订阅文件读取 (`src/app/api/subscription/[filename]/route.ts`)
+- 生产环境专用，从 `/tmp/subscriptions/` 读取文件
+- 防目录穿越安全校验
+- 开发环境直接通过 Next.js 静态文件服务访问
+
+### 4. 二维码生成
+- 前端使用 `qrcode.react` 的 `QRCodeSVG` 组件
+- 编码内容为订阅文件的完整 URL
+
+## 协议格式
+
+| 协议 | URI 格式 |
+|------|----------|
+| SS | `ss://base64(method:password@host:port)#name` |
+| VMess | `vmess://base64(JSON配置)` |
+| VLESS | `vless://uuid@host:port?params#name` |
+| Trojan | `trojan://password@host:port?params#name` |
 
 ## 包管理规范
 
 **仅允许使用 pnpm** 作为包管理器，**严禁使用 npm 或 yarn**。
-**常用命令**：
-- 安装依赖：`pnpm add <package>`
-- 安装开发依赖：`pnpm add -D <package>`
-- 安装所有依赖：`pnpm install`
-- 移除依赖：`pnpm remove <package>`
 
 ## 开发规范
 
 ### 编码规范
-
-- 默认按 TypeScript `strict` 心智写代码；优先复用当前作用域已声明的变量、函数、类型和导入，禁止引用未声明标识符或拼错变量名。
-- 禁止隐式 `any` 和 `as any`；函数参数、返回值、解构项、事件对象、`catch` 错误在使用前应有明确类型或先完成类型收窄，并清理未使用的变量和导入。
-
-### next.config 配置规范
-
-- 配置的路径不要写死绝对路径，必须使用 path.resolve(__dirname, ...)、import.meta.dirname 或 process.cwd() 动态拼接。
+- TypeScript strict 模式，禁止隐式 any
+- 函数参数、返回值必须有明确类型标注
 
 ### Hydration 问题防范
+- 使用 'use client' + useEffect + useState 处理客户端动态内容
+- 禁止在 JSX 中直接使用 typeof window、Date.now() 等
 
-1. 严禁在 JSX 渲染逻辑中直接使用 typeof window、Date.now()、Math.random() 等动态数据。**必须使用 'use client' 并配合 useEffect + useState 确保动态内容仅在客户端挂载后渲染**；同时严禁非法 HTML 嵌套（如 <p> 嵌套 <div>）。
-2. **禁止使用 head 标签**，优先使用 metadata，详见文档：https://nextjs.org/docs/app/api-reference/functions/generate-metadata
-   1. 三方 CSS、字体等资源可在 `globals.css` 中顶部通过 `@import` 引入或使用 next/font
-   2. preload, preconnect, dns-prefetch 通过 ReactDOM 的 preload、preconnect、dns-prefetch 方法引入
-   3. json-ld 可阅读 https://nextjs.org/docs/app/guides/json-ld
-
-## UI 设计与组件规范 (UI & Styling Standards)
-
-- 模板默认预装核心组件库 `shadcn/ui`，位于`src/components/ui/`目录下
-- Next.js 项目**必须默认**采用 shadcn/ui 组件、风格和规范，**除非用户指定用其他的组件和规范。**
+### 环境变量
+- `COZE_PROJECT_DOMAIN_DEFAULT`: 对外访问域名（含协议前缀）
+- `DEPLOY_RUN_PORT`: 服务监听端口
+- `COZE_PROJECT_ENV`: 环境标识（DEV/PROD）
