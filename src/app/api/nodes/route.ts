@@ -17,6 +17,7 @@ interface NodeInput {
   host?: string;
   alterId?: number;
   expiryDate?: string;
+  region?: string;
 }
 
 // POST: Add a single node
@@ -54,6 +55,7 @@ async function addSingleNode(node: NodeInput, userId: string) {
       host: node.host || '',
       alter_id: node.alterId || 0,
       expiry_date: node.expiryDate || '',
+      region: node.region || '',
       user_id: userId,
       sort_order: nextSort,
     })

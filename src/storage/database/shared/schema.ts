@@ -25,6 +25,7 @@ export const vpnNodes = pgTable(
     path: varchar("path", { length: 255 }).default(''),
     host: varchar("host", { length: 255 }).default(''),
     alter_id: integer("alter_id").default(0),
+    region: varchar("region", { length: 64 }).default(''),
     expiry_date: varchar("expiry_date", { length: 32 }).default(''),
     user_id: uuid("user_id"),
     sort_order: integer("sort_order").notNull().default(0),

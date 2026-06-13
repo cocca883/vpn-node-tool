@@ -39,6 +39,7 @@ interface VpnNode {
   host: string;
   alter_id: number;
   expiry_date: string;
+  region: string;
   sort_order: number;
 }
 
@@ -56,6 +57,7 @@ interface NodeForm {
   path: string;
   host: string;
   expiryDate: string;
+  region: string;
 }
 
 const PROTOCOLS = ['socks5', 'ss', 'vmess', 'vless', 'trojan'];
@@ -74,6 +76,7 @@ const initialForm: NodeForm = {
   path: '',
   host: '',
   expiryDate: '',
+  region: '',
 };
 
 // ==================== Sortable Row ====================
@@ -119,6 +122,13 @@ function SortableRow({
         </span>
       </td>
       <td className="px-3 py-2.5 font-mono text-sm text-slate-200">{node.node_name}</td>
+      <td className="px-3 py-2.5 text-xs text-slate-300">
+        {node.region ? (
+          <span className="px-1.5 py-0.5 rounded bg-cyan-900/30 text-cyan-300 text-xs">{node.region}</span>
+        ) : (
+          <span className="text-slate-600">-</span>
+        )}
+      </td>
       <td className="px-3 py-2.5 font-mono text-xs text-slate-400">{node.address}</td>
       <td className="px-3 py-2.5 font-mono text-xs text-slate-400 text-center">{node.port}</td>
       <td className="px-3 py-2.5 font-mono text-xs text-slate-400 max-w-[120px] truncate">{node.account}</td>
@@ -258,6 +268,7 @@ export default function HomePage() {
           path: form.path,
           host: form.host,
           expiryDate: form.expiryDate,
+          region: form.region,
         }),
       });
       const data = await res.json();
@@ -444,7 +455,7 @@ export default function HomePage() {
                 <textarea
                   value={smartImportText}
                   onChange={(e) => setSmartImportText(e.target.value)}
-                  placeholder={"粘贴节点数据，每行一条，支持以下格式：\n\n1. URI格式：socks5://user:pass@1.2.3.4:1080#名称\n2. 竖线分隔：socks5|1.2.3.4|1080|user|pass|名称\n3. 斜杠分隔：socks5/1.2.3.4/1080/user/pass/名称"}
+                  placeholder={"粘贴节点数据，每行一条，支持以下格式：\n\n1. URI格式：socks5://user:pass@1.2.3.4:1080#名称\n2. 竖线分隔：socks5|1.2.3.4|1080|user|pass|名称|地区\n3. 斜杠分隔：socks5/1.2.3.4/1080/user/pass/名称/地区"}
                   className="w-full h-40 bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm font-mono text-slate-200 placeholder-slate-600 focus:border-cyan-600 focus:outline-none resize-none"
                 />
                 <button
@@ -525,6 +536,16 @@ export default function HomePage() {
                       value={form.nodeName}
                       onChange={(e) => setForm({ ...form, nodeName: e.target.value })}
                       placeholder="东京-01"
+                      className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-600 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">地区</label>
+                    <input
+                      type="text"
+                      value={form.region}
+                      onChange={(e) => setForm({ ...form, region: e.target.value })}
+                      placeholder="日本"
                       className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-600 focus:outline-none"
                     />
                   </div>
@@ -708,6 +729,7 @@ export default function HomePage() {
                     <th className="px-3 py-2.5 w-10">排序</th>
                     <th className="px-3 py-2.5">协议</th>
                     <th className="px-3 py-2.5">名称</th>
+                    <th className="px-3 py-2.5">地区</th>
                     <th className="px-3 py-2.5">地址</th>
                     <th className="px-3 py-2.5">端口</th>
                     <th className="px-3 py-2.5">账号</th>

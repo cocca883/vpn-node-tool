@@ -16,6 +16,7 @@ interface ParsedNode {
   path?: string;
   host?: string;
   expiryDate?: string;
+  region?: string;
 }
 
 // Known protocol prefixes
@@ -202,8 +203,9 @@ function parseDelimited(line: string, delimiter: string): ParsedNode | null {
   const account = remaining.length > 2 ? remaining[2] : '';
   const password = remaining.length > 3 ? remaining[3] : '';
   const nodeName = remaining.length > 4 ? remaining[4] : `${protocol}-${address}`;
-  const encryption = remaining.length > 5 ? remaining[5] : '';
-  const expiryDate = remaining.length > 6 ? remaining[6] : '';
+  const region = remaining.length > 5 ? remaining[5] : '';
+  const encryption = remaining.length > 6 ? remaining[6] : '';
+  const expiryDate = remaining.length > 7 ? remaining[7] : '';
 
   return {
     protocol,
@@ -212,6 +214,7 @@ function parseDelimited(line: string, delimiter: string): ParsedNode | null {
     account,
     password,
     nodeName,
+    region,
     encryption: protocol === 'ss' ? encryption || 'aes-256-gcm' : encryption,
     expiryDate,
   };
@@ -275,6 +278,7 @@ export async function POST(request: NextRequest) {
       host: node.host || '',
       alter_id: 0,
       expiry_date: node.expiryDate || '',
+      region: node.region || '',
       user_id: user!.id,
       sort_order: nextSort++,
     }));
