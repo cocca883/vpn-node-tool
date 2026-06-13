@@ -35,10 +35,15 @@ export async function PUT(
         return NextResponse.json({ error: '不能对总管理员执行此操作' }, { status: 403 });
       }
       const banned = action === 'ban';
+
+      // Get user email for upsert
+      const { data: userData } = await serviceClient.auth.admin.getUserById(id);
+      const userEmail = userData?.user?.email || '未知';
+
       const { error: upsertError } = await serviceClient
         .from('user_profiles')
         .upsert(
-          { user_id: id, banned, updated_at: new Date().toISOString() },
+          { user_id: id, email: userEmail, banned, created_at: new Date().toISOString() },
           { onConflict: 'user_id' }
         );
 
