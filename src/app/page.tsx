@@ -167,7 +167,7 @@ export default function HomePage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [addLoading, setAddLoading] = useState(false);
   const [generating, setGenerating] = useState<'android' | 'ios' | null>(null);
-  const [qrResult, setQrResult] = useState<{ url: string; platform: string } | null>(null);
+  const [qrResult, setQrResult] = useState<{ url: string; platform: string; uris: string[] } | null>(null);
   const [smartImportText, setSmartImportText] = useState('');
   const [showSmartImport, setShowSmartImport] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
@@ -367,7 +367,7 @@ export default function HomePage() {
       });
       const data = await res.json();
       if (data.success) {
-        setQrResult({ url: data.data.fullUrl, platform });
+        setQrResult({ url: data.data.fullUrl, platform, uris: data.data.uris || [] });
       } else {
         alert(data.error || '生成失败');
       }
@@ -858,6 +858,31 @@ export default function HomePage() {
                       {copyFeedback === '链接' ? '已复制' : '复制'}
                     </button>
                   </div>
+                  {qrResult.uris.length > 0 && (
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs text-slate-500">节点链接（{qrResult.uris.length} 条）：</span>
+                        <button
+                          onClick={() => copyToClipboard(qrResult.uris.join('\n'), '节点链接')}
+                          className={`text-xs px-2 py-1 rounded transition-colors ${
+                            copyFeedback === '节点链接'
+                              ? 'bg-emerald-900/50 text-emerald-300'
+                              : 'bg-slate-800 text-slate-400 hover:text-cyan-300'
+                          }`}
+                        >
+                          {copyFeedback === '节点链接' ? '已复制' : '复制全部'}
+                        </button>
+                      </div>
+                      <div className="max-h-60 overflow-y-auto bg-slate-950/50 rounded-lg border border-slate-800/50 p-3 space-y-1.5">
+                        {qrResult.uris.map((uri, i) => (
+                          <div key={i} className="text-xs font-mono text-slate-400 break-all leading-relaxed">
+                            <span className="text-cyan-600 select-none mr-1.5">{i + 1}.</span>
+                            {uri}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
