@@ -183,12 +183,23 @@ export default function HomePage() {
           setSession(s);
           setUser(s?.user ?? null);
           setAuthLoading(false);
-          // Check admin status
           if (s?.access_token) {
+            // Check admin status
             fetch('/api/admin/check', { headers: { 'x-session': s.access_token } })
               .then(r => r.json())
               .then(d => setIsAdmin(d.isAdmin === true))
               .catch(() => setIsAdmin(false));
+            // Check banned status
+            fetch('/api/check-banned', { headers: { 'x-session': s.access_token } })
+              .then(r => r.json())
+              .then(d => {
+                if (d.banned) {
+                  supabase.auth.signOut().then(() => {
+                    window.location.href = '/login';
+                  });
+                }
+              })
+              .catch(() => {});
           }
         });
 
@@ -196,7 +207,6 @@ export default function HomePage() {
           (_event: string, s: Session | null) => {
             setSession(s);
             setUser(s?.user ?? null);
-            // Re-check admin on auth change
             if (s?.access_token) {
               fetch('/api/admin/check', { headers: { 'x-session': s.access_token } })
                 .then(r => r.json())
@@ -210,7 +220,6 @@ export default function HomePage() {
         sub = subscription;
       })
       .catch(() => {
-        // Config load failed - allow page to show error state
         setAuthLoading(false);
       });
 

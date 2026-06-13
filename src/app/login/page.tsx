@@ -52,7 +52,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const supabase = await getSupabaseBrowserClientWithRetry();
-      const { error: loginError } = await supabase.auth.signInWithPassword({
+      const { data, error: loginError } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
@@ -63,6 +63,24 @@ export default function LoginPage() {
           setError(loginError.message);
         }
         return;
+      }
+      // Check if user is banned
+      if (data.session) {
+        const res = await fetch('/api/admin/check', {
+          headers: { 'x-session': data.session.access_token },
+        });
+        const checkData = await res.json();
+        // If check fails (not admin), we still need to verify banned status
+        // Use the banned-check API
+        const banRes = await fetch('/api/check-banned', {
+          headers: { 'x-session': data.session.access_token },
+        });
+        const banData = await banRes.json();
+        if (banData.banned) {
+          await supabase.auth.signOut();
+          setError('该账号已被封禁');
+          return;
+        }
       }
       router.replace('/');
     } catch (err) {
