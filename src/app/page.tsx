@@ -97,7 +97,9 @@ function SortableRow({
     transition,
   };
 
-  const isExpired = node.expiry_date && new Date(node.expiry_date) < new Date();
+  const now = new Date();
+  const isExpired = node.expiry_date && new Date(node.expiry_date) < now;
+  const isExpiringSoon = !isExpired && node.expiry_date && (new Date(node.expiry_date).getTime() - now.getTime()) < 2 * 24 * 60 * 60 * 1000;
 
   return (
     <tr
@@ -135,7 +137,7 @@ function SortableRow({
       <td className="px-3 py-2.5 font-mono text-xs text-slate-400 max-w-[100px] truncate">{node.password || '-'}</td>
       <td className="px-3 py-2.5 text-xs text-slate-400 text-center">
         {node.expiry_date ? (
-          <span className={isExpired ? 'text-red-400' : 'text-emerald-400'}>
+          <span className={isExpired ? 'text-red-400' : isExpiringSoon ? 'text-amber-400' : 'text-emerald-400'}>
             {node.expiry_date}
           </span>
         ) : (
@@ -768,15 +770,15 @@ export default function HomePage() {
                         className="w-4 h-4 rounded border-cyan-700 bg-slate-800 accent-cyan-500 cursor-pointer"
                       />
                     </th>
-                    <th className="px-3 py-2.5 w-10">排序</th>
-                    <th className="px-3 py-2.5">协议</th>
-                    <th className="px-3 py-2.5">名称</th>
-                    <th className="px-3 py-2.5">地区</th>
-                    <th className="px-3 py-2.5">地址</th>
-                    <th className="px-3 py-2.5">端口</th>
-                    <th className="px-3 py-2.5">账号</th>
-                    <th className="px-3 py-2.5">密码</th>
-                    <th className="px-3 py-2.5">到期</th>
+                    <th className="px-3 py-2.5 text-center w-10">排序</th>
+                    <th className="px-3 py-2.5 text-center">协议</th>
+                    <th className="px-3 py-2.5 text-center">名称</th>
+                    <th className="px-3 py-2.5 text-center">地区</th>
+                    <th className="px-3 py-2.5 text-center">地址</th>
+                    <th className="px-3 py-2.5 text-center">端口</th>
+                    <th className="px-3 py-2.5 text-center">账号</th>
+                    <th className="px-3 py-2.5 text-center">密码</th>
+                    <th className="px-3 py-2.5 text-center">到期</th>
                     <th className="px-3 py-2.5 text-center">操作</th>
                   </tr>
                 </thead>
