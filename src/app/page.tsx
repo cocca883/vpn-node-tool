@@ -435,6 +435,9 @@ export default function HomePage() {
           </div>
           <div className="flex items-center gap-4 text-sm text-slate-400">
             <span>{user.email}</span>
+            <a href="/admin" className="px-3 py-1 rounded border border-cyan-900/40 text-cyan-400 hover:bg-cyan-950/40 transition-colors text-xs">
+              后台管理
+            </a>
             <button
               onClick={handleLogout}
               className="px-3 py-1 rounded border border-cyan-900/40 text-cyan-400 hover:bg-cyan-950/40 transition-colors text-xs"

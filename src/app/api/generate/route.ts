@@ -193,6 +193,17 @@ export async function POST(request: NextRequest) {
       sort_order: n.sort_order as number,
     }));
 
+    // Read system config for filenames
+    const { data: configData } = await client
+      .from('system_config')
+      .select('key, value')
+      .in('key', ['android_filename', 'ios_filename', 'ios_rename_hash', 'ios_socks_prefix', 'android_port_suffix']);
+
+    const configMap: Record<string, string> = {};
+    for (const row of (configData || [])) {
+      configMap[row.key] = row.value;
+    }
+
     // Build URIs
     const uris = mappedNodes.map(node =>
       platform === 'android' ? buildAndroidUri(node) : buildIosUri(node)
@@ -205,11 +216,11 @@ export async function POST(request: NextRequest) {
 
     if (platform === 'android') {
       // Android: plain text, no base64
-      filename = 'mlkVPN468_Android';
+      filename = configMap['android_filename'] || 'mlkVPN468_Android';
       content = uris.join('\n');
     } else {
       // IOS: base64 encode the whole content
-      filename = 'mlkVPN468_IOS';
+      filename = configMap['ios_filename'] || 'mlkVPN468_IOS';
       content = Buffer.from(uris.join('\n')).toString('base64');
     }
 

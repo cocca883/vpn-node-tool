@@ -38,3 +38,18 @@ export const vpnNodes = pgTable(
     index("vpn_nodes_user_id_idx").on(table.user_id),
   ]
 );
+
+export const adminUsers = pgTable("admin_users", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  user_id: uuid("user_id").notNull().unique(),
+  email: varchar("email", { length: 255 }).notNull(),
+  role: varchar("role", { length: 20 }).notNull().default('admin'),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const systemConfig = pgTable("system_config", {
+  key: varchar("key", { length: 128 }).primaryKey(),
+  value: text("value").notNull(),
+  description: varchar("description", { length: 255 }),
+  updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
