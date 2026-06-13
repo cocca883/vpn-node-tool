@@ -1,7 +1,24 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
   Shield,
   Plus,
@@ -19,12 +36,34 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
+  GripVertical,
+  Circle,
+  CheckCircle2,
+  X,
 } from 'lucide-react';
 
-type Protocol = 'ss' | 'vmess' | 'vless' | 'trojan';
+type Protocol = 'ss' | 'vmess' | 'vless' | 'trojan' | 'socks5';
+
+interface VpnNode {
+  id: number;
+  protocol: string;
+  address: string;
+  port: number;
+  account: string;
+  password: string;
+  node_name: string;
+  encryption: string;
+  network: string;
+  tls: string;
+  sni: string;
+  path: string;
+  host: string;
+  alter_id: number;
+  sort_order: number;
+  created_at: string;
+}
 
 interface NodeForm {
-  id: string;
   protocol: Protocol;
   address: string;
   port: string;
@@ -48,9 +87,24 @@ interface GenerateResult {
   fullUrl: string;
 }
 
-function createEmptyNode(): NodeForm {
+const protocolLabels: Record<Protocol, string> = {
+  ss: 'Shadowsocks',
+  vmess: 'VMess',
+  vless: 'VLESS',
+  trojan: 'Trojan',
+  socks5: 'SOCKS5',
+};
+
+const protocolColors: Record<Protocol, string> = {
+  ss: 'bg-blue-500/15 text-blue-400 border-blue-500/20',
+  vmess: 'bg-purple-500/15 text-purple-400 border-purple-500/20',
+  vless: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
+  trojan: 'bg-amber-500/15 text-amber-400 border-amber-500/20',
+  socks5: 'bg-rose-500/15 text-rose-400 border-rose-500/20',
+};
+
+function emptyForm(): NodeForm {
   return {
-    id: crypto.randomUUID().slice(0, 8),
     protocol: 'vmess',
     address: '',
     port: '',
@@ -67,16 +121,8 @@ function createEmptyNode(): NodeForm {
   };
 }
 
-const protocolLabels: Record<Protocol, string> = {
-  ss: 'Shadowsocks',
-  vmess: 'VMess',
-  vless: 'VLESS',
-  trojan: 'Trojan',
-};
-
 function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
-
   const handleCopy = useCallback(async () => {
     await navigator.clipboard.writeText(text);
     setCopied(true);
@@ -98,101 +144,238 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
   );
 }
 
+// Sortable node list item
+function SortableNodeItem({
+  node,
+  isSelected,
+  onToggleSelect,
+  onDelete,
+}: {
+  node: VpnNode;
+  isSelected: boolean;
+  onToggleSelect: (id: number) => void;
+  onDelete: (id: number) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: node.id,
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  const proto = node.protocol as Protocol;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-3 px-4 py-3 rounded-lg border transition-all duration-200 ${
+        isDragging
+          ? 'bg-slate-800/80 border-cyan-500/40 shadow-lg shadow-cyan-500/10'
+          : 'bg-slate-800/40 border-slate-700/30 hover:border-cyan-500/20'
+      }`}
+    >
+      {/* Drag handle */}
+      <button
+        className="p-1 text-slate-600 hover:text-slate-400 cursor-grab active:cursor-grabbing touch-none"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical className="w-4 h-4" />
+      </button>
+
+      {/* Checkbox */}
+      <button onClick={() => onToggleSelect(node.id)} className="flex-shrink-0">
+        {isSelected ? (
+          <CheckCircle2 className="w-5 h-5 text-cyan-400" />
+        ) : (
+          <Circle className="w-5 h-5 text-slate-600 hover:text-slate-400" />
+        )}
+      </button>
+
+      {/* Protocol badge */}
+      <span className={`text-xs font-mono px-2 py-0.5 rounded border ${protocolColors[proto] || 'bg-slate-700/30 text-slate-400'}`}>
+        {protocolLabels[proto] || node.protocol}
+      </span>
+
+      {/* Node info */}
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium text-slate-200 truncate">{node.node_name}</div>
+        <div className="text-xs text-slate-500 font-mono truncate">
+          {node.address}:{node.port}
+        </div>
+      </div>
+
+      {/* Delete */}
+      <button
+        onClick={() => onDelete(node.id)}
+        className="p-1.5 text-slate-600 hover:text-red-400 transition-colors rounded-md hover:bg-red-500/10"
+      >
+        <Trash2 className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
 export default function HomePage() {
-  const [nodes, setNodes] = useState<NodeForm[]>([createEmptyNode()]);
-  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set([nodes[0].id]));
+  const [form, setForm] = useState<NodeForm>(emptyForm());
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [nodes, setNodes] = useState<VpnNode[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [addLoading, setAddLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nodesLoading, setNodesLoading] = useState(true);
 
-  const updateNode = (id: string, field: keyof NodeForm, value: string) => {
-    setNodes((prev) =>
-      prev.map((n) => {
-        if (n.id !== id) return n;
-        const updated = { ...n, [field]: value };
-        // Auto-adjust defaults when protocol changes
-        if (field === 'protocol') {
-          if (value === 'ss') {
-            updated.encryption = 'aes-256-gcm';
-          } else if (value === 'vmess') {
-            updated.encryption = 'auto';
-            updated.alterId = '0';
-          } else if (value === 'vless') {
-            updated.encryption = 'none';
-          } else if (value === 'trojan') {
-            updated.tls = 'tls';
-          }
-        }
-        return updated;
-      })
-    );
-  };
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
-  const addNode = () => {
-    const newNode = createEmptyNode();
-    setNodes((prev) => [...prev, newNode]);
-    setExpandedNodes((prev) => new Set([...prev, newNode.id]));
-  };
+  // Fetch nodes on mount
+  useEffect(() => {
+    fetchNodes();
+  }, []);
 
-  const removeNode = (id: string) => {
-    if (nodes.length <= 1) return;
-    setNodes((prev) => prev.filter((n) => n.id !== id));
-    setExpandedNodes((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  };
-
-  const toggleExpand = (id: string) => {
-    setExpandedNodes((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
+  const fetchNodes = async () => {
+    try {
+      const res = await fetch('/api/nodes/list');
+      const data = await res.json();
+      if (data.success) {
+        setNodes(data.data);
       }
+    } catch (err) {
+      console.error('Fetch nodes error:', err);
+    } finally {
+      setNodesLoading(false);
+    }
+  };
+
+  const updateForm = (field: keyof NodeForm, value: string) => {
+    setForm((prev) => {
+      const updated = { ...prev, [field]: value };
+      if (field === 'protocol') {
+        if (value === 'ss') updated.encryption = 'aes-256-gcm';
+        else if (value === 'vmess') { updated.encryption = 'auto'; updated.alterId = '0'; }
+        else if (value === 'vless') updated.encryption = 'none';
+        else if (value === 'trojan') updated.tls = 'tls';
+        else if (value === 'socks5') updated.encryption = '';
+      }
+      return updated;
+    });
+  };
+
+  const handleAddNode = async () => {
+    if (!form.address || !form.port || !form.nodeName) {
+      setError('请填写服务器地址、端口和节点名称');
+      return;
+    }
+    setError(null);
+    setAddLoading(true);
+    try {
+      const res = await fetch('/api/nodes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          protocol: form.protocol,
+          address: form.address,
+          port: parseInt(form.port, 10),
+          account: form.account,
+          password: form.password,
+          nodeName: form.nodeName,
+          encryption: form.encryption,
+          network: form.network,
+          tls: form.tls,
+          sni: form.sni,
+          path: form.path,
+          host: form.host,
+          alterId: parseInt(form.alterId, 10) || 0,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || '添加失败');
+        return;
+      }
+      setForm(emptyForm());
+      setShowAdvanced(false);
+      await fetchNodes();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '请求失败');
+    } finally {
+      setAddLoading(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    try {
+      await fetch(`/api/nodes/${id}`, { method: 'DELETE' });
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      await fetchNodes();
+    } catch (err) {
+      console.error('Delete error:', err);
+    }
+  };
+
+  const handleToggleSelect = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
+  };
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = nodes.findIndex((n) => n.id === active.id);
+    const newIndex = nodes.findIndex((n) => n.id === over.id);
+    const reordered = arrayMove(nodes, oldIndex, newIndex);
+    setNodes(reordered);
+
+    // Persist new order
+    const items = reordered.map((n, i) => ({ id: n.id, sort_order: i }));
+    try {
+      await fetch('/api/nodes/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+    } catch (err) {
+      console.error('Reorder error:', err);
+      await fetchNodes();
+    }
   };
 
   const handleGenerate = async () => {
+    if (selectedIds.size === 0) {
+      setError('请至少选择一个节点');
+      return;
+    }
     setError(null);
     setResult(null);
     setLoading(true);
-
     try {
-      const payload = {
-        nodes: nodes.map((n) => ({
-          protocol: n.protocol,
-          address: n.address,
-          port: parseInt(n.port, 10) || 0,
-          account: n.account,
-          password: n.password,
-          nodeName: n.nodeName || `Node-${n.id}`,
-          encryption: n.encryption,
-          network: n.network,
-          tls: n.tls,
-          sni: n.sni,
-          path: n.path,
-          host: n.host,
-          alterId: parseInt(n.alterId, 10) || 0,
-        })),
-      };
-
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ nodeIds: Array.from(selectedIds) }),
       });
-
       const data = await res.json();
-
       if (!res.ok) {
         setError(data.error || '生成失败');
         return;
       }
-
       setResult(data.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : '请求失败');
@@ -230,306 +413,293 @@ export default function HomePage() {
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left: Node Input Form */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
-                <Server className="w-5 h-5 text-cyan-400" />
-                节点配置
-              </h2>
-              <button
-                onClick={addNode}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                添加节点
-              </button>
+          {/* Left Column: Add Form + Node List */}
+          <div className="space-y-6">
+            {/* Add Node Form */}
+            <div className="rounded-xl border border-cyan-500/10 bg-slate-900/60 backdrop-blur-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-cyan-500/10">
+                <h2 className="text-base font-semibold text-slate-200 flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-cyan-400" />
+                  添加节点
+                </h2>
+              </div>
+              <div className="p-4 space-y-3">
+                {/* Protocol + Name */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1.5">协议类型</label>
+                    <select
+                      value={form.protocol}
+                      onChange={(e) => updateForm('protocol', e.target.value)}
+                      className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                    >
+                      {Object.entries(protocolLabels).map(([key, label]) => (
+                        <option key={key} value={key}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1.5">节点名称</label>
+                    <input
+                      type="text"
+                      value={form.nodeName}
+                      onChange={(e) => updateForm('nodeName', e.target.value)}
+                      placeholder="如：东京-01"
+                      className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                    />
+                  </div>
+                </div>
+
+                {/* Address + Port */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="col-span-2">
+                    <label className="block text-xs text-slate-400 mb-1.5 flex items-center gap-1">
+                      <Globe className="w-3 h-3" /> 服务器地址
+                    </label>
+                    <input
+                      type="text"
+                      value={form.address}
+                      onChange={(e) => updateForm('address', e.target.value)}
+                      placeholder="IP 或域名"
+                      className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1.5 flex items-center gap-1">
+                      <Hash className="w-3 h-3" /> 端口
+                    </label>
+                    <input
+                      type="number"
+                      value={form.port}
+                      onChange={(e) => updateForm('port', e.target.value)}
+                      placeholder="443"
+                      className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                    />
+                  </div>
+                </div>
+
+                {/* Account + Password */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1.5 flex items-center gap-1">
+                      <User className="w-3 h-3" />
+                      {form.protocol === 'ss' ? '加密方式' : form.protocol === 'vmess' || form.protocol === 'vless' ? 'UUID' : '账号'}
+                    </label>
+                    <input
+                      type="text"
+                      value={form.account}
+                      onChange={(e) => updateForm('account', e.target.value)}
+                      placeholder={form.protocol === 'ss' ? 'aes-256-gcm' : form.protocol === 'vmess' || form.protocol === 'vless' ? 'UUID' : '账号'}
+                      className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1.5 flex items-center gap-1">
+                      <KeyRound className="w-3 h-3" /> 密码
+                    </label>
+                    <input
+                      type="text"
+                      value={form.password}
+                      onChange={(e) => updateForm('password', e.target.value)}
+                      placeholder="密码"
+                      className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                    />
+                  </div>
+                </div>
+
+                {/* Advanced toggle */}
+                <button
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                  className="text-xs text-slate-500 hover:text-slate-400 transition-colors flex items-center gap-1"
+                >
+                  {showAdvanced ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  高级设置
+                </button>
+
+                {showAdvanced && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1.5">加密方式</label>
+                      <input
+                        type="text"
+                        value={form.encryption}
+                        onChange={(e) => updateForm('encryption', e.target.value)}
+                        placeholder="auto"
+                        className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1.5">传输协议</label>
+                      <select
+                        value={form.network}
+                        onChange={(e) => updateForm('network', e.target.value)}
+                        className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                      >
+                        <option value="tcp">TCP</option>
+                        <option value="ws">WebSocket</option>
+                        <option value="grpc">gRPC</option>
+                        <option value="h2">HTTP/2</option>
+                        <option value="quic">QUIC</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1.5">TLS</label>
+                      <select
+                        value={form.tls}
+                        onChange={(e) => updateForm('tls', e.target.value)}
+                        className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                      >
+                        <option value="">关闭</option>
+                        <option value="tls">TLS</option>
+                        <option value="reality">Reality</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1.5">SNI</label>
+                      <input
+                        type="text"
+                        value={form.sni}
+                        onChange={(e) => updateForm('sni', e.target.value)}
+                        placeholder="域名"
+                        className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1.5">Path</label>
+                      <input
+                        type="text"
+                        value={form.path}
+                        onChange={(e) => updateForm('path', e.target.value)}
+                        placeholder="/path"
+                        className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1.5">Host</label>
+                      <input
+                        type="text"
+                        value={form.host}
+                        onChange={(e) => updateForm('host', e.target.value)}
+                        placeholder="域名"
+                        className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                      />
+                    </div>
+                    {form.protocol === 'vmess' && (
+                      <div>
+                        <label className="block text-xs text-slate-400 mb-1.5">Alter ID</label>
+                        <input
+                          type="number"
+                          value={form.alterId}
+                          onChange={(e) => updateForm('alterId', e.target.value)}
+                          placeholder="0"
+                          className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Add button */}
+                <button
+                  onClick={handleAddNode}
+                  disabled={addLoading}
+                  className="w-full py-2.5 rounded-lg font-medium text-sm transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50 bg-cyan-500/15 text-cyan-400 border border-cyan-500/25 hover:bg-cyan-500/25 hover:border-cyan-500/40"
+                >
+                  {addLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                  添加到列表
+                </button>
+              </div>
             </div>
 
-            {nodes.map((node, index) => {
-              const isExpanded = expandedNodes.has(node.id);
-              return (
-                <div
-                  key={node.id}
-                  className="rounded-xl border border-cyan-500/10 bg-slate-900/60 backdrop-blur-sm overflow-hidden transition-all duration-300 hover:border-cyan-500/20"
-                >
-                  {/* Node Header */}
-                  <div
-                    className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-800/40 transition-colors"
-                    onClick={() => toggleExpand(node.id)}
+            {/* Node List */}
+            <div className="rounded-xl border border-cyan-500/10 bg-slate-900/60 backdrop-blur-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-cyan-500/10 flex items-center justify-between">
+                <h2 className="text-base font-semibold text-slate-200 flex items-center gap-2">
+                  <Server className="w-4 h-4 text-cyan-400" />
+                  节点列表
+                  <span className="text-xs font-normal text-slate-500">({nodes.length})</span>
+                </h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (selectedIds.size === nodes.length) setSelectedIds(new Set());
+                      else setSelectedIds(new Set(nodes.map((n) => n.id)));
+                    }}
+                    className="text-xs text-slate-500 hover:text-cyan-400 transition-colors"
                   >
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-mono text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded">
-                        #{index + 1}
-                      </span>
-                      <span className="text-sm font-medium text-slate-300">
-                        {node.nodeName || `节点 ${index + 1}`}
-                      </span>
-                      <span className="text-xs text-slate-500">
-                        {protocolLabels[node.protocol]}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {nodes.length > 1 && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            removeNode(node.id);
-                          }}
-                          className="p-1 text-slate-500 hover:text-red-400 transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                      {isExpanded ? (
-                        <ChevronUp className="w-4 h-4 text-slate-500" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4 text-slate-500" />
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Node Form */}
-                  {isExpanded && (
-                    <div className="px-4 pb-4 space-y-3 border-t border-cyan-500/5">
-                      {/* Protocol + Node Name */}
-                      <div className="grid grid-cols-2 gap-3 mt-3">
-                        <div>
-                          <label className="block text-xs text-slate-400 mb-1.5">
-                            协议类型
-                          </label>
-                          <select
-                            value={node.protocol}
-                            onChange={(e) => updateNode(node.id, 'protocol', e.target.value)}
-                            className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
-                          >
-                            {Object.entries(protocolLabels).map(([key, label]) => (
-                              <option key={key} value={key}>
-                                {label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-xs text-slate-400 mb-1.5">
-                            节点名称
-                          </label>
-                          <input
-                            type="text"
-                            value={node.nodeName}
-                            onChange={(e) => updateNode(node.id, 'nodeName', e.target.value)}
-                            placeholder="如：东京-01"
-                            className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Address + Port */}
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="col-span-2">
-                          <label className="block text-xs text-slate-400 mb-1.5 flex items-center gap-1">
-                            <Globe className="w-3 h-3" />
-                            服务器地址
-                          </label>
-                          <input
-                            type="text"
-                            value={node.address}
-                            onChange={(e) => updateNode(node.id, 'address', e.target.value)}
-                            placeholder="IP 或域名"
-                            className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-slate-400 mb-1.5 flex items-center gap-1">
-                            <Hash className="w-3 h-3" />
-                            端口
-                          </label>
-                          <input
-                            type="number"
-                            value={node.port}
-                            onChange={(e) => updateNode(node.id, 'port', e.target.value)}
-                            placeholder="443"
-                            className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Account + Password */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs text-slate-400 mb-1.5 flex items-center gap-1">
-                            <User className="w-3 h-3" />
-                            {node.protocol === 'ss' ? '加密方式' : node.protocol === 'vmess' || node.protocol === 'vless' ? 'UUID' : '账号'}
-                          </label>
-                          <input
-                            type="text"
-                            value={node.account}
-                            onChange={(e) => updateNode(node.id, 'account', e.target.value)}
-                            placeholder={
-                              node.protocol === 'ss'
-                                ? 'aes-256-gcm'
-                                : node.protocol === 'vmess' || node.protocol === 'vless'
-                                  ? 'UUID'
-                                  : '账号'
-                            }
-                            className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-slate-400 mb-1.5 flex items-center gap-1">
-                            <KeyRound className="w-3 h-3" />
-                            密码
-                          </label>
-                          <input
-                            type="text"
-                            value={node.password}
-                            onChange={(e) => updateNode(node.id, 'password', e.target.value)}
-                            placeholder="密码"
-                            className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Advanced Fields */}
-                      <details className="group">
-                        <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-400 transition-colors list-none flex items-center gap-1">
-                          <ChevronDown className="w-3 h-3 transition-transform group-open:rotate-180" />
-                          高级设置
-                        </summary>
-                        <div className="grid grid-cols-2 gap-3 mt-3">
-                          <div>
-                            <label className="block text-xs text-slate-400 mb-1.5">
-                              加密方式
-                            </label>
-                            <input
-                              type="text"
-                              value={node.encryption}
-                              onChange={(e) => updateNode(node.id, 'encryption', e.target.value)}
-                              placeholder="auto"
-                              className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-slate-400 mb-1.5">
-                              传输协议
-                            </label>
-                            <select
-                              value={node.network}
-                              onChange={(e) => updateNode(node.id, 'network', e.target.value)}
-                              className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
-                            >
-                              <option value="tcp">TCP</option>
-                              <option value="ws">WebSocket</option>
-                              <option value="grpc">gRPC</option>
-                              <option value="h2">HTTP/2</option>
-                              <option value="quic">QUIC</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs text-slate-400 mb-1.5">
-                              TLS
-                            </label>
-                            <select
-                              value={node.tls}
-                              onChange={(e) => updateNode(node.id, 'tls', e.target.value)}
-                              className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
-                            >
-                              <option value="">关闭</option>
-                              <option value="tls">TLS</option>
-                              <option value="reality">Reality</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs text-slate-400 mb-1.5">
-                              SNI
-                            </label>
-                            <input
-                              type="text"
-                              value={node.sni}
-                              onChange={(e) => updateNode(node.id, 'sni', e.target.value)}
-                              placeholder="域名"
-                              className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-slate-400 mb-1.5">
-                              Path
-                            </label>
-                            <input
-                              type="text"
-                              value={node.path}
-                              onChange={(e) => updateNode(node.id, 'path', e.target.value)}
-                              placeholder="/path"
-                              className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-slate-400 mb-1.5">
-                              Host
-                            </label>
-                            <input
-                              type="text"
-                              value={node.host}
-                              onChange={(e) => updateNode(node.id, 'host', e.target.value)}
-                              placeholder="域名"
-                              className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
-                            />
-                          </div>
-                          {node.protocol === 'vmess' && (
-                            <div>
-                              <label className="block text-xs text-slate-400 mb-1.5">
-                                Alter ID
-                              </label>
-                              <input
-                                type="number"
-                                value={node.alterId}
-                                onChange={(e) => updateNode(node.id, 'alterId', e.target.value)}
-                                placeholder="0"
-                                className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors"
-                              />
-                            </div>
-                          )}
-                        </div>
-                      </details>
-                    </div>
-                  )}
+                    {selectedIds.size === nodes.length && nodes.length > 0 ? '取消全选' : '全选'}
+                  </button>
                 </div>
-              );
-            })}
-
-            {/* Generate Button */}
-            <button
-              onClick={handleGenerate}
-              disabled={loading}
-              className="w-full py-3 rounded-xl font-medium text-sm transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-500/15 text-cyan-400 border border-cyan-500/25 hover:bg-cyan-500/25 hover:border-cyan-500/40 hover:shadow-lg hover:shadow-cyan-500/10"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  生成中...
-                </>
-              ) : (
-                <>
-                  <FileText className="w-4 h-4" />
-                  生成订阅文件
-                </>
-              )}
-            </button>
-
-            {error && (
-              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-                {error}
               </div>
-            )}
+              <div className="p-4">
+                {nodesLoading ? (
+                  <div className="text-center py-8">
+                    <Loader2 className="w-6 h-6 text-cyan-400 animate-spin mx-auto mb-2" />
+                    <p className="text-xs text-slate-500">加载中...</p>
+                  </div>
+                ) : nodes.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Server className="w-8 h-8 text-slate-700 mx-auto mb-2" />
+                    <p className="text-sm text-slate-500">暂无节点，请添加</p>
+                  </div>
+                ) : (
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleDragEnd}
+                  >
+                    <SortableContext
+                      items={nodes.map((n) => n.id)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      <div className="space-y-2">
+                        {nodes.map((node) => (
+                          <SortableNodeItem
+                            key={node.id}
+                            node={node}
+                            isSelected={selectedIds.has(node.id)}
+                            onToggleSelect={handleToggleSelect}
+                            onDelete={handleDelete}
+                          />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
+                )}
+              </div>
+
+              {/* Generate Button */}
+              {nodes.length > 0 && (
+                <div className="px-4 pb-4">
+                  <button
+                    onClick={handleGenerate}
+                    disabled={loading || selectedIds.size === 0}
+                    className="w-full py-3 rounded-xl font-medium text-sm transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-500/15 text-cyan-400 border border-cyan-500/25 hover:bg-cyan-500/25 hover:border-cyan-500/40 hover:shadow-lg hover:shadow-cyan-500/10"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        生成中...
+                      </>
+                    ) : (
+                      <>
+                        <QrCode className="w-4 h-4" />
+                        生成订阅 ({selectedIds.size} 个节点)
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Right: Results */}
+          {/* Right Column: Results */}
           <div className="space-y-4">
             {!result ? (
               <div className="rounded-xl border border-dashed border-slate-700/50 bg-slate-900/30 backdrop-blur-sm p-12 text-center">
                 <QrCode className="w-12 h-12 text-slate-600 mx-auto mb-4" />
                 <p className="text-slate-500 text-sm">
-                  填写节点信息后点击生成，结果将在此展示
+                  选择节点后点击生成，结果将在此展示
                 </p>
               </div>
             ) : (
@@ -545,17 +715,14 @@ export default function HomePage() {
                   </div>
                   <div className="p-4 space-y-2 max-h-48 overflow-y-auto">
                     {result.uris.map((uri, i) => (
-                      <div
-                        key={i}
-                        className="text-xs font-mono text-slate-400 bg-slate-800/50 p-2.5 rounded-lg break-all"
-                      >
+                      <div key={i} className="text-xs font-mono text-slate-400 bg-slate-800/50 p-2.5 rounded-lg break-all">
                         {uri}
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* Base64 Result */}
+                {/* Base64 */}
                 <div className="rounded-xl border border-cyan-500/10 bg-slate-900/60 backdrop-blur-sm overflow-hidden">
                   <div className="px-4 py-3 border-b border-cyan-500/10 flex items-center justify-between">
                     <h3 className="text-sm font-medium text-slate-300 flex items-center gap-2">
@@ -584,19 +751,23 @@ export default function HomePage() {
                     <div className="text-sm font-mono text-cyan-400 bg-slate-800/50 p-3 rounded-lg break-all">
                       {result.fullUrl}
                     </div>
-                    <p className="text-xs text-slate-500 mt-2">
-                      可在客户端中使用此链接作为订阅地址
-                    </p>
+                    <p className="text-xs text-slate-500 mt-2">可在客户端中使用此链接作为订阅地址</p>
                   </div>
                 </div>
 
                 {/* QR Code */}
                 <div className="rounded-xl border border-cyan-500/10 bg-slate-900/60 backdrop-blur-sm overflow-hidden">
-                  <div className="px-4 py-3 border-b border-cyan-500/10">
+                  <div className="px-4 py-3 border-b border-cyan-500/10 flex items-center justify-between">
                     <h3 className="text-sm font-medium text-slate-300 flex items-center gap-2">
                       <QrCode className="w-4 h-4 text-cyan-400" />
                       二维码
                     </h3>
+                    <button
+                      onClick={() => setResult(null)}
+                      className="text-xs text-slate-500 hover:text-slate-400 transition-colors flex items-center gap-1"
+                    >
+                      <X className="w-3 h-3" /> 关闭
+                    </button>
                   </div>
                   <div className="p-6 flex flex-col items-center gap-4">
                     <div className="bg-white p-4 rounded-xl shadow-lg shadow-cyan-500/5">
@@ -608,17 +779,20 @@ export default function HomePage() {
                         fgColor="#0a0f1a"
                       />
                     </div>
-                    <p className="text-xs text-slate-500 text-center">
-                      扫描二维码获取订阅文件地址
-                    </p>
+                    <p className="text-xs text-slate-500 text-center">扫描二维码获取订阅文件地址</p>
                   </div>
                 </div>
               </>
             )}
+
+            {error && (
+              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                {error}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Footer */}
         <footer className="mt-12 text-center text-xs text-slate-600">
           VPN 节点配置工具 - 仅用于合法用途
         </footer>
