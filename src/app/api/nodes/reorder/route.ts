@@ -1,28 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { getAuthenticatedUser } from '@/lib/auth-helper';
 
-interface ReorderItem {
-  id: number;
-  sort_order: number;
-}
-
+// POST /api/nodes/reorder
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { items } = body as { items: ReorderItem[] };
+    const { user, error: authError, status } = await getAuthenticatedUser(request);
+    if (authError) {
+      return NextResponse.json({ error: authError }, { status });
+    }
 
-    if (!items || !Array.isArray(items) || items.length === 0) {
+    const body = await request.json();
+    const items: Array<{ id: number; sort_order: number }> = body.items;
+
+    if (!items || !Array.isArray(items)) {
       return NextResponse.json({ error: '缺少排序数据' }, { status: 400 });
     }
 
     const client = getSupabaseClient();
 
-    // Update sort_order for each item
     for (const item of items) {
       const { error } = await client
         .from('vpn_nodes')
-        .update({ sort_order: item.sort_order, updated_at: new Date().toISOString() })
-        .eq('id', item.id);
+        .update({ sort_order: item.sort_order })
+        .eq('id', item.id)
+        .eq('user_id', user!.id);
 
       if (error) {
         throw new Error(`更新排序失败: ${error.message}`);

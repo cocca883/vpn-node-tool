@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   DndContext,
@@ -19,31 +19,10 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import {
-  Shield,
-  Plus,
-  Trash2,
-  Copy,
-  Check,
-  Server,
-  Globe,
-  Hash,
-  KeyRound,
-  User,
-  FileText,
-  QrCode,
-  Link,
-  ChevronDown,
-  ChevronUp,
-  Loader2,
-  GripVertical,
-  Circle,
-  CheckCircle2,
-  X,
-} from 'lucide-react';
+import { getSupabaseBrowserClientAsync } from '@/lib/supabase-browser';
+import type { Session, User } from '@supabase/supabase-js';
 
-type Protocol = 'ss' | 'vmess' | 'vless' | 'trojan' | 'socks5';
-
+// ==================== Types ====================
 interface VpnNode {
   id: number;
   protocol: string;
@@ -59,12 +38,12 @@ interface VpnNode {
   path: string;
   host: string;
   alter_id: number;
+  expiry_date: string;
   sort_order: number;
-  created_at: string;
 }
 
 interface NodeForm {
-  protocol: Protocol;
+  protocol: string;
   address: string;
   port: string;
   account: string;
@@ -76,210 +55,195 @@ interface NodeForm {
   sni: string;
   path: string;
   host: string;
-  alterId: string;
+  expiryDate: string;
 }
 
-interface GenerateResult {
-  uris: string[];
-  base64: string;
-  filename: string;
-  urlPath: string;
-  fullUrl: string;
-}
+const PROTOCOLS = ['socks5', 'ss', 'vmess', 'vless', 'trojan'];
 
-const protocolLabels: Record<Protocol, string> = {
-  ss: 'Shadowsocks',
-  vmess: 'VMess',
-  vless: 'VLESS',
-  trojan: 'Trojan',
-  socks5: 'SOCKS5',
+const initialForm: NodeForm = {
+  protocol: 'socks5',
+  address: '',
+  port: '',
+  account: '',
+  password: '',
+  nodeName: '',
+  encryption: 'aes-256-gcm',
+  network: 'tcp',
+  tls: '',
+  sni: '',
+  path: '',
+  host: '',
+  expiryDate: '',
 };
 
-const protocolColors: Record<Protocol, string> = {
-  ss: 'bg-blue-500/15 text-blue-400 border-blue-500/20',
-  vmess: 'bg-purple-500/15 text-purple-400 border-purple-500/20',
-  vless: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
-  trojan: 'bg-amber-500/15 text-amber-400 border-amber-500/20',
-  socks5: 'bg-rose-500/15 text-rose-400 border-rose-500/20',
-};
-
-function emptyForm(): NodeForm {
-  return {
-    protocol: 'vmess',
-    address: '',
-    port: '',
-    account: '',
-    password: '',
-    nodeName: '',
-    encryption: 'auto',
-    network: 'tcp',
-    tls: '',
-    sni: '',
-    path: '',
-    host: '',
-    alterId: '0',
-  };
-}
-
-function CopyButton({ text, className }: { text: string; className?: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(async () => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [text]);
-
-  return (
-    <button
-      onClick={handleCopy}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-all duration-200 ${
-        copied
-          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-          : 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20'
-      } ${className || ''}`}
-    >
-      {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-      {copied ? '已复制' : '复制'}
-    </button>
-  );
-}
-
-// Sortable node list item
-function SortableNodeItem({
+// ==================== Sortable Row ====================
+function SortableRow({
   node,
-  isSelected,
+  selected,
   onToggleSelect,
   onDelete,
 }: {
   node: VpnNode;
-  isSelected: boolean;
+  selected: boolean;
   onToggleSelect: (id: number) => void;
   onDelete: (id: number) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: node.id,
-  });
-
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: node.id });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : 1,
   };
 
-  const proto = node.protocol as Protocol;
+  const isExpired = node.expiry_date && new Date(node.expiry_date) < new Date();
 
   return (
-    <div
+    <tr
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-3 px-4 py-3 rounded-lg border transition-all duration-200 ${
-        isDragging
-          ? 'bg-slate-800/80 border-cyan-500/40 shadow-lg shadow-cyan-500/10'
-          : 'bg-slate-800/40 border-slate-700/30 hover:border-cyan-500/20'
-      }`}
+      className={`border-b border-cyan-900/20 hover:bg-cyan-950/30 ${isExpired ? 'opacity-50' : ''}`}
     >
-      {/* Drag handle */}
-      <button
-        className="p-1 text-slate-600 hover:text-slate-400 cursor-grab active:cursor-grabbing touch-none"
-        {...attributes}
-        {...listeners}
-      >
-        <GripVertical className="w-4 h-4" />
-      </button>
-
-      {/* Checkbox */}
-      <button onClick={() => onToggleSelect(node.id)} className="flex-shrink-0">
-        {isSelected ? (
-          <CheckCircle2 className="w-5 h-5 text-cyan-400" />
+      <td className="px-3 py-2.5 text-center w-10">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => onToggleSelect(node.id)}
+          className="w-4 h-4 rounded border-cyan-700 bg-slate-800 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0 cursor-pointer accent-cyan-500"
+        />
+      </td>
+      <td className="px-3 py-2.5" {...attributes} {...listeners}>
+        <span className="cursor-grab active:cursor-grabbing text-slate-500 hover:text-cyan-400 text-lg">⠿</span>
+      </td>
+      <td className="px-3 py-2.5">
+        <span className="px-2 py-0.5 rounded text-xs font-mono bg-cyan-900/40 text-cyan-300 uppercase">
+          {node.protocol}
+        </span>
+      </td>
+      <td className="px-3 py-2.5 font-mono text-sm text-slate-200">{node.node_name}</td>
+      <td className="px-3 py-2.5 font-mono text-xs text-slate-400">{node.address}</td>
+      <td className="px-3 py-2.5 font-mono text-xs text-slate-400 text-center">{node.port}</td>
+      <td className="px-3 py-2.5 font-mono text-xs text-slate-400 max-w-[120px] truncate">{node.account}</td>
+      <td className="px-3 py-2.5 font-mono text-xs text-slate-400 max-w-[100px] truncate">{node.password || '-'}</td>
+      <td className="px-3 py-2.5 text-xs text-slate-400 text-center">
+        {node.expiry_date ? (
+          <span className={isExpired ? 'text-red-400' : 'text-emerald-400'}>
+            {node.expiry_date}
+          </span>
         ) : (
-          <Circle className="w-5 h-5 text-slate-600 hover:text-slate-400" />
+          <span className="text-slate-600">-</span>
         )}
-      </button>
-
-      {/* Protocol badge */}
-      <span className={`text-xs font-mono px-2 py-0.5 rounded border ${protocolColors[proto] || 'bg-slate-700/30 text-slate-400'}`}>
-        {protocolLabels[proto] || node.protocol}
-      </span>
-
-      {/* Node info */}
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-slate-200 truncate">{node.node_name}</div>
-        <div className="text-xs text-slate-500 font-mono truncate">
-          {node.address}:{node.port}
-        </div>
-      </div>
-
-      {/* Delete */}
-      <button
-        onClick={() => onDelete(node.id)}
-        className="p-1.5 text-slate-600 hover:text-red-400 transition-colors rounded-md hover:bg-red-500/10"
-      >
-        <Trash2 className="w-4 h-4" />
-      </button>
-    </div>
+      </td>
+      <td className="px-3 py-2.5 text-center">
+        <button
+          onClick={() => onDelete(node.id)}
+          className="text-red-400 hover:text-red-300 text-sm transition-colors"
+          title="删除"
+        >
+          ✕
+        </button>
+      </td>
+    </tr>
   );
 }
 
+// ==================== Main Page ====================
 export default function HomePage() {
-  const [form, setForm] = useState<NodeForm>(emptyForm());
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [nodes, setNodes] = useState<VpnNode[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [result, setResult] = useState<GenerateResult | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState<NodeForm>(initialForm);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [addLoading, setAddLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [nodesLoading, setNodesLoading] = useState(true);
+  const [generating, setGenerating] = useState<'android' | 'ios' | null>(null);
+  const [qrResult, setQrResult] = useState<{ url: string; platform: string } | null>(null);
+  const [smartImportText, setSmartImportText] = useState('');
+  const [showSmartImport, setShowSmartImport] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState('');
 
+  // Auth state - initialize supabase client after config is ready
+  useEffect(() => {
+    let sub: { unsubscribe: () => void } | null = null;
+
+    getSupabaseBrowserClientAsync().then((supabase) => {
+      supabase.auth.getSession().then(({ data: { session: s } }) => {
+        setSession(s);
+        setUser(s?.user ?? null);
+        setAuthLoading(false);
+      });
+
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(
+        (_event: string, s: Session | null) => {
+          setSession(s);
+          setUser(s?.user ?? null);
+        }
+      );
+      sub = subscription;
+    });
+
+    return () => {
+      sub?.unsubscribe();
+    };
+  }, []);
+
+  // Fetch nodes
+  const fetchNodes = useCallback(async () => {
+    if (!session) return;
+    try {
+      const token = session.access_token;
+      const res = await fetch('/api/nodes/list', {
+        headers: { 'x-session': token },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNodes(data.data || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch nodes:', err);
+    }
+  }, [session]);
+
+  useEffect(() => {
+    fetchNodes();
+  }, [fetchNodes]);
+
+  // DnD sensors
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // Fetch nodes on mount
-  useEffect(() => {
-    fetchNodes();
-  }, []);
+  // Handle drag end
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
 
-  const fetchNodes = async () => {
+    const oldIndex = nodes.findIndex(n => n.id === active.id);
+    const newIndex = nodes.findIndex(n => n.id === over.id);
+    const newNodes = arrayMove(nodes, oldIndex, newIndex);
+    setNodes(newNodes);
+
     try {
-      const res = await fetch('/api/nodes/list');
-      const data = await res.json();
-      if (data.success) {
-        setNodes(data.data);
-      }
-    } catch (err) {
-      console.error('Fetch nodes error:', err);
-    } finally {
-      setNodesLoading(false);
+      const items = newNodes.map((n, i) => ({ id: n.id, sort_order: i }));
+      await fetch('/api/nodes/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-session': session!.access_token },
+        body: JSON.stringify({ items }),
+      });
+    } catch {
+      fetchNodes();
     }
   };
 
-  const updateForm = (field: keyof NodeForm, value: string) => {
-    setForm((prev) => {
-      const updated = { ...prev, [field]: value };
-      if (field === 'protocol') {
-        if (value === 'ss') updated.encryption = 'aes-256-gcm';
-        else if (value === 'vmess') { updated.encryption = 'auto'; updated.alterId = '0'; }
-        else if (value === 'vless') updated.encryption = 'none';
-        else if (value === 'trojan') updated.tls = 'tls';
-        else if (value === 'socks5') updated.encryption = '';
-      }
-      return updated;
-    });
-  };
-
+  // Add node
   const handleAddNode = async () => {
-    if (!form.address || !form.port || !form.nodeName) {
-      setError('请填写服务器地址、端口和节点名称');
-      return;
-    }
-    setError(null);
+    if (!form.address || !form.port || !form.nodeName) return;
     setAddLoading(true);
     try {
       const res = await fetch('/api/nodes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-session': session!.access_token },
         body: JSON.stringify({
           protocol: form.protocol,
           address: form.address,
@@ -293,40 +257,44 @@ export default function HomePage() {
           sni: form.sni,
           path: form.path,
           host: form.host,
-          alterId: parseInt(form.alterId, 10) || 0,
+          expiryDate: form.expiryDate,
         }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || '添加失败');
-        return;
+      if (data.success) {
+        setForm(initialForm);
+        fetchNodes();
+      } else {
+        alert(data.error || '添加失败');
       }
-      setForm(emptyForm());
-      setShowAdvanced(false);
-      await fetchNodes();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '请求失败');
+    } catch {
+      alert('添加节点失败');
     } finally {
       setAddLoading(false);
     }
   };
 
+  // Delete node
   const handleDelete = async (id: number) => {
     try {
-      await fetch(`/api/nodes/${id}`, { method: 'DELETE' });
-      setSelectedIds((prev) => {
+      await fetch(`/api/nodes/${id}`, {
+        method: 'DELETE',
+        headers: { 'x-session': session!.access_token },
+      });
+      setSelectedIds(prev => {
         const next = new Set(prev);
         next.delete(id);
         return next;
       });
-      await fetchNodes();
-    } catch (err) {
-      console.error('Delete error:', err);
+      fetchNodes();
+    } catch {
+      alert('删除失败');
     }
   };
 
-  const handleToggleSelect = (id: number) => {
-    setSelectedIds((prev) => {
+  // Toggle select
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -334,469 +302,517 @@ export default function HomePage() {
     });
   };
 
-  const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const oldIndex = nodes.findIndex((n) => n.id === active.id);
-    const newIndex = nodes.findIndex((n) => n.id === over.id);
-    const reordered = arrayMove(nodes, oldIndex, newIndex);
-    setNodes(reordered);
-
-    // Persist new order
-    const items = reordered.map((n, i) => ({ id: n.id, sort_order: i }));
-    try {
-      await fetch('/api/nodes/reorder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items }),
-      });
-    } catch (err) {
-      console.error('Reorder error:', err);
-      await fetchNodes();
+  const toggleSelectAll = () => {
+    if (selectedIds.size === nodes.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(nodes.map(n => n.id)));
     }
   };
 
-  const handleGenerate = async () => {
+  // Generate subscription
+  const handleGenerate = async (platform: 'android' | 'ios') => {
     if (selectedIds.size === 0) {
-      setError('请至少选择一个节点');
+      alert('请先勾选节点');
       return;
     }
-    setError(null);
-    setResult(null);
-    setLoading(true);
+    setGenerating(platform);
     try {
       const res = await fetch('/api/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nodeIds: Array.from(selectedIds) }),
+        headers: { 'Content-Type': 'application/json', 'x-session': session!.access_token },
+        body: JSON.stringify({
+          nodeIds: Array.from(selectedIds),
+          platform,
+        }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || '生成失败');
-        return;
+      if (data.success) {
+        setQrResult({ url: data.data.fullUrl, platform });
+      } else {
+        alert(data.error || '生成失败');
       }
-      setResult(data.data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '请求失败');
+    } catch {
+      alert('生成订阅失败');
     } finally {
-      setLoading(false);
+      setGenerating(null);
     }
   };
 
+  // Smart import
+  const handleSmartImport = async () => {
+    if (!smartImportText.trim()) return;
+    setImportLoading(true);
+    try {
+      const res = await fetch('/api/nodes/smart-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-session': session!.access_token },
+        body: JSON.stringify({ text: smartImportText }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`成功导入 ${data.count} 个节点`);
+        setSmartImportText('');
+        setShowSmartImport(false);
+        fetchNodes();
+      } else {
+        alert(data.error || '导入失败');
+      }
+    } catch {
+      alert('智能导入失败');
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  // Copy to clipboard
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopyFeedback(label);
+      setTimeout(() => setCopyFeedback(''), 1500);
+    });
+  };
+
+  // Logout
+  const handleLogout = async () => {
+    const supabase = await getSupabaseBrowserClientAsync();
+    await supabase.auth.signOut();
+    setSession(null);
+    setUser(null);
+  };
+
+  // Auth loading
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#0a0f1a] flex items-center justify-center">
+        <div className="text-cyan-400 text-lg">加载中...</div>
+      </div>
+    );
+  }
+
+  // Not logged in - redirect to login
+  if (!session || !user) {
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login';
+    }
+    return (
+      <div className="min-h-screen bg-[#0a0f1a] flex items-center justify-center">
+        <div className="text-slate-400">正在跳转到登录页...</div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#0a0f1a] text-slate-200 relative">
-      {/* Grid background */}
-      <div
-        className="fixed inset-0 pointer-events-none opacity-[0.03]"
-        style={{
-          backgroundImage:
-            'linear-gradient(rgba(6,182,212,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(6,182,212,0.5) 1px, transparent 1px)',
-          backgroundSize: '48px 48px',
-        }}
-      />
-
-      <div className="relative z-10 max-w-5xl mx-auto px-4 py-8 sm:py-12">
-        {/* Header */}
-        <header className="text-center mb-10">
-          <div className="inline-flex items-center gap-3 mb-4">
-            <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center">
-              <Shield className="w-6 h-6 text-cyan-400" />
-            </div>
-            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
-              VPN 节点配置工具
-            </h1>
+    <div className="min-h-screen bg-[#0a0f1a] text-slate-200">
+      {/* Header */}
+      <header className="border-b border-cyan-900/30 bg-[#0a0f1a]/80 backdrop-blur-sm sticky top-0 z-50">
+        <div className="max-w-[1600px] mx-auto px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+            <h1 className="text-lg font-semibold tracking-wide">VPN 节点配置工具</h1>
           </div>
-          <p className="text-slate-400 text-sm sm:text-base max-w-xl mx-auto">
-            输入节点信息，自动生成协议链接，Base64 编码后保存为订阅文件，并生成可扫描的二维码
-          </p>
-        </header>
+          <div className="flex items-center gap-4 text-sm text-slate-400">
+            <span>{user.email}</span>
+            <button
+              onClick={handleLogout}
+              className="px-3 py-1 rounded border border-cyan-900/40 text-cyan-400 hover:bg-cyan-950/40 transition-colors text-xs"
+            >
+              退出登录
+            </button>
+          </div>
+        </div>
+      </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left Column: Add Form + Node List */}
-          <div className="space-y-6">
-            {/* Add Node Form */}
-            <div className="rounded-xl border border-cyan-500/10 bg-slate-900/60 backdrop-blur-sm overflow-hidden">
-              <div className="px-4 py-3 border-b border-cyan-500/10">
-                <h2 className="text-base font-semibold text-slate-200 flex items-center gap-2">
-                  <Plus className="w-4 h-4 text-cyan-400" />
-                  添加节点
-                </h2>
+      <main className="max-w-[1600px] mx-auto px-6 py-6 space-y-6">
+        {/* Row 1: Add Node + Instructions */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          {/* Add Node Form */}
+          <div className="lg:col-span-3 bg-slate-900/50 border border-cyan-900/20 rounded-lg p-5 backdrop-blur-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-cyan-300 tracking-wide uppercase">添加节点</h2>
+              <button
+                onClick={() => setShowSmartImport(!showSmartImport)}
+                className="text-xs px-3 py-1 rounded border border-cyan-800/50 text-cyan-400 hover:bg-cyan-950/50 transition-colors"
+              >
+                {showSmartImport ? '手动添加' : '智能导入'}
+              </button>
+            </div>
+
+            {showSmartImport ? (
+              /* Smart Import */
+              <div className="space-y-3">
+                <textarea
+                  value={smartImportText}
+                  onChange={(e) => setSmartImportText(e.target.value)}
+                  placeholder={"粘贴节点数据，每行一条，支持以下格式：\n\n1. URI格式：socks5://user:pass@1.2.3.4:1080#名称\n2. 竖线分隔：socks5|1.2.3.4|1080|user|pass|名称\n3. 斜杠分隔：socks5/1.2.3.4/1080/user/pass/名称"}
+                  className="w-full h-40 bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm font-mono text-slate-200 placeholder-slate-600 focus:border-cyan-600 focus:outline-none resize-none"
+                />
+                <button
+                  onClick={handleSmartImport}
+                  disabled={importLoading}
+                  className="w-full py-2 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                >
+                  {importLoading ? '识别导入中...' : '智能识别并导入'}
+                </button>
               </div>
-              <div className="p-4 space-y-3">
-                {/* Protocol + Name */}
-                <div className="grid grid-cols-2 gap-3">
+            ) : (
+              /* Manual Form */
+              <div className="space-y-3">
+                {/* Row 1: Protocol + Address + Port */}
+                <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1.5">协议类型</label>
+                    <label className="text-xs text-slate-400 mb-1 block">协议类型</label>
                     <select
                       value={form.protocol}
-                      onChange={(e) => updateForm('protocol', e.target.value)}
-                      className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                      onChange={(e) => setForm({ ...form, protocol: e.target.value })}
+                      className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 focus:border-cyan-600 focus:outline-none"
                     >
-                      {Object.entries(protocolLabels).map(([key, label]) => (
-                        <option key={key} value={key}>{label}</option>
+                      {PROTOCOLS.map(p => (
+                        <option key={p} value={p}>{p.toUpperCase()}</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1.5">节点名称</label>
-                    <input
-                      type="text"
-                      value={form.nodeName}
-                      onChange={(e) => updateForm('nodeName', e.target.value)}
-                      placeholder="如：东京-01"
-                      className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
-                    />
-                  </div>
-                </div>
-
-                {/* Address + Port */}
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="col-span-2">
-                    <label className="block text-xs text-slate-400 mb-1.5 flex items-center gap-1">
-                      <Globe className="w-3 h-3" /> 服务器地址
-                    </label>
+                    <label className="text-xs text-slate-400 mb-1 block">服务器地址</label>
                     <input
                       type="text"
                       value={form.address}
-                      onChange={(e) => updateForm('address', e.target.value)}
-                      placeholder="IP 或域名"
-                      className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                      onChange={(e) => setForm({ ...form, address: e.target.value })}
+                      placeholder="1.2.3.4"
+                      className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-600 focus:outline-none font-mono"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1.5 flex items-center gap-1">
-                      <Hash className="w-3 h-3" /> 端口
-                    </label>
+                    <label className="text-xs text-slate-400 mb-1 block">端口</label>
                     <input
-                      type="number"
+                      type="text"
                       value={form.port}
-                      onChange={(e) => updateForm('port', e.target.value)}
+                      onChange={(e) => setForm({ ...form, port: e.target.value })}
                       placeholder="443"
-                      className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                      className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-600 focus:outline-none font-mono"
                     />
                   </div>
                 </div>
 
-                {/* Account + Password */}
-                <div className="grid grid-cols-2 gap-3">
+                {/* Row 2: Account + Password + NodeName + Expiry */}
+                <div className="grid grid-cols-4 gap-3">
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1.5 flex items-center gap-1">
-                      <User className="w-3 h-3" />
-                      {form.protocol === 'ss' ? '加密方式' : form.protocol === 'vmess' || form.protocol === 'vless' ? 'UUID' : '账号'}
+                    <label className="text-xs text-slate-400 mb-1 block">
+                      {form.protocol === 'vmess' || form.protocol === 'vless' ? 'UUID' : '账号'}
                     </label>
                     <input
                       type="text"
                       value={form.account}
-                      onChange={(e) => updateForm('account', e.target.value)}
-                      placeholder={form.protocol === 'ss' ? 'aes-256-gcm' : form.protocol === 'vmess' || form.protocol === 'vless' ? 'UUID' : '账号'}
-                      className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                      onChange={(e) => setForm({ ...form, account: e.target.value })}
+                      placeholder={form.protocol === 'vmess' || form.protocol === 'vless' ? 'uuid' : '用户名'}
+                      className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-600 focus:outline-none font-mono"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1.5 flex items-center gap-1">
-                      <KeyRound className="w-3 h-3" /> 密码
-                    </label>
+                    <label className="text-xs text-slate-400 mb-1 block">密码</label>
                     <input
                       type="text"
                       value={form.password}
-                      onChange={(e) => updateForm('password', e.target.value)}
+                      onChange={(e) => setForm({ ...form, password: e.target.value })}
                       placeholder="密码"
-                      className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                      className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-600 focus:outline-none font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">节点名称</label>
+                    <input
+                      type="text"
+                      value={form.nodeName}
+                      onChange={(e) => setForm({ ...form, nodeName: e.target.value })}
+                      placeholder="东京-01"
+                      className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-600 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">到期时间</label>
+                    <input
+                      type="date"
+                      value={form.expiryDate}
+                      onChange={(e) => setForm({ ...form, expiryDate: e.target.value })}
+                      className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 focus:border-cyan-600 focus:outline-none font-mono"
                     />
                   </div>
                 </div>
 
-                {/* Advanced toggle */}
-                <button
-                  onClick={() => setShowAdvanced(!showAdvanced)}
-                  className="text-xs text-slate-500 hover:text-slate-400 transition-colors flex items-center gap-1"
-                >
-                  {showAdvanced ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                  高级设置
-                </button>
+                {/* Advanced Settings */}
+                <div>
+                  <button
+                    onClick={() => setShowAdvanced(!showAdvanced)}
+                    className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
+                  >
+                    {showAdvanced ? '▼ 收起高级设置' : '▶ 展开高级设置'}
+                  </button>
+                </div>
 
                 {showAdvanced && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1.5">加密方式</label>
-                      <input
-                        type="text"
-                        value={form.encryption}
-                        onChange={(e) => updateForm('encryption', e.target.value)}
-                        placeholder="auto"
-                        className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1.5">传输协议</label>
-                      <select
-                        value={form.network}
-                        onChange={(e) => updateForm('network', e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
-                      >
-                        <option value="tcp">TCP</option>
-                        <option value="ws">WebSocket</option>
-                        <option value="grpc">gRPC</option>
-                        <option value="h2">HTTP/2</option>
-                        <option value="quic">QUIC</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1.5">TLS</label>
-                      <select
-                        value={form.tls}
-                        onChange={(e) => updateForm('tls', e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
-                      >
-                        <option value="">关闭</option>
-                        <option value="tls">TLS</option>
-                        <option value="reality">Reality</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1.5">SNI</label>
-                      <input
-                        type="text"
-                        value={form.sni}
-                        onChange={(e) => updateForm('sni', e.target.value)}
-                        placeholder="域名"
-                        className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1.5">Path</label>
-                      <input
-                        type="text"
-                        value={form.path}
-                        onChange={(e) => updateForm('path', e.target.value)}
-                        placeholder="/path"
-                        className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1.5">Host</label>
-                      <input
-                        type="text"
-                        value={form.host}
-                        onChange={(e) => updateForm('host', e.target.value)}
-                        placeholder="域名"
-                        className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
-                      />
-                    </div>
-                    {form.protocol === 'vmess' && (
+                  <div className="space-y-3 border-t border-cyan-900/20 pt-3">
+                    <div className="grid grid-cols-3 gap-3">
                       <div>
-                        <label className="block text-xs text-slate-400 mb-1.5">Alter ID</label>
+                        <label className="text-xs text-slate-400 mb-1 block">加密方式</label>
                         <input
-                          type="number"
-                          value={form.alterId}
-                          onChange={(e) => updateForm('alterId', e.target.value)}
-                          placeholder="0"
-                          className="w-full px-3 py-2 text-sm bg-slate-800/80 border border-slate-700/50 rounded-lg text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20"
+                          type="text"
+                          value={form.encryption}
+                          onChange={(e) => setForm({ ...form, encryption: e.target.value })}
+                          placeholder="aes-256-gcm"
+                          className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-600 focus:outline-none font-mono"
                         />
                       </div>
-                    )}
+                      <div>
+                        <label className="text-xs text-slate-400 mb-1 block">传输协议</label>
+                        <select
+                          value={form.network}
+                          onChange={(e) => setForm({ ...form, network: e.target.value })}
+                          className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 focus:border-cyan-600 focus:outline-none"
+                        >
+                          <option value="tcp">tcp</option>
+                          <option value="ws">ws</option>
+                          <option value="grpc">grpc</option>
+                          <option value="h2">h2</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-400 mb-1 block">TLS</label>
+                        <select
+                          value={form.tls}
+                          onChange={(e) => setForm({ ...form, tls: e.target.value })}
+                          className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 focus:border-cyan-600 focus:outline-none"
+                        >
+                          <option value="">无</option>
+                          <option value="tls">tls</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-3">
+                      <div>
+                        <label className="text-xs text-slate-400 mb-1 block">SNI</label>
+                        <input
+                          type="text"
+                          value={form.sni}
+                          onChange={(e) => setForm({ ...form, sni: e.target.value })}
+                          placeholder="example.com"
+                          className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-600 focus:outline-none font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-400 mb-1 block">Path</label>
+                        <input
+                          type="text"
+                          value={form.path}
+                          onChange={(e) => setForm({ ...form, path: e.target.value })}
+                          placeholder="/ws"
+                          className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-600 focus:outline-none font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-400 mb-1 block">Host</label>
+                        <input
+                          type="text"
+                          value={form.host}
+                          onChange={(e) => setForm({ ...form, host: e.target.value })}
+                          placeholder="example.com"
+                          className="w-full bg-slate-800/50 border border-cyan-900/30 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:border-cyan-600 focus:outline-none font-mono"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <button
+                          onClick={() => setShowAdvanced(false)}
+                          className="w-full py-2 rounded border border-cyan-900/40 text-slate-400 hover:text-cyan-300 text-xs transition-colors"
+                        >
+                          收起
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
 
-                {/* Add button */}
+                {/* Add Button */}
                 <button
                   onClick={handleAddNode}
-                  disabled={addLoading}
-                  className="w-full py-2.5 rounded-lg font-medium text-sm transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50 bg-cyan-500/15 text-cyan-400 border border-cyan-500/25 hover:bg-cyan-500/25 hover:border-cyan-500/40"
+                  disabled={addLoading || !form.address || !form.port || !form.nodeName}
+                  className="w-full py-2.5 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:hover:bg-cyan-600 text-white text-sm font-medium transition-colors"
                 >
-                  {addLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                  添加到列表
+                  {addLoading ? '添加中...' : '添加节点'}
                 </button>
               </div>
-            </div>
+            )}
+          </div>
 
-            {/* Node List */}
-            <div className="rounded-xl border border-cyan-500/10 bg-slate-900/60 backdrop-blur-sm overflow-hidden">
-              <div className="px-4 py-3 border-b border-cyan-500/10 flex items-center justify-between">
-                <h2 className="text-base font-semibold text-slate-200 flex items-center gap-2">
-                  <Server className="w-4 h-4 text-cyan-400" />
-                  节点列表
-                  <span className="text-xs font-normal text-slate-500">({nodes.length})</span>
-                </h2>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      if (selectedIds.size === nodes.length) setSelectedIds(new Set());
-                      else setSelectedIds(new Set(nodes.map((n) => n.id)));
-                    }}
-                    className="text-xs text-slate-500 hover:text-cyan-400 transition-colors"
-                  >
-                    {selectedIds.size === nodes.length && nodes.length > 0 ? '取消全选' : '全选'}
-                  </button>
-                </div>
+          {/* Instructions */}
+          <div className="lg:col-span-2 bg-slate-900/50 border border-cyan-900/20 rounded-lg p-5 backdrop-blur-sm">
+            <h2 className="text-sm font-semibold text-cyan-300 tracking-wide uppercase mb-3">操作说明</h2>
+            <div className="space-y-3 text-sm text-slate-400">
+              <div>
+                <h3 className="text-cyan-400 font-medium mb-1">1. 添加节点</h3>
+                <p>选择协议类型，填写服务器信息后点击添加。支持手动添加和智能导入（支持 URI 格式、竖线/斜杠分隔格式）。</p>
               </div>
-              <div className="p-4">
-                {nodesLoading ? (
-                  <div className="text-center py-8">
-                    <Loader2 className="w-6 h-6 text-cyan-400 animate-spin mx-auto mb-2" />
-                    <p className="text-xs text-slate-500">加载中...</p>
-                  </div>
-                ) : nodes.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Server className="w-8 h-8 text-slate-700 mx-auto mb-2" />
-                    <p className="text-sm text-slate-500">暂无节点，请添加</p>
-                  </div>
-                ) : (
+              <div>
+                <h3 className="text-cyan-400 font-medium mb-1">2. 管理节点</h3>
+                <p>在节点列表中可拖拽排序、勾选或删除节点。到期时间已过的节点将显示为半透明。</p>
+              </div>
+              <div>
+                <h3 className="text-cyan-400 font-medium mb-1">3. 生成订阅</h3>
+                <p>勾选需要的节点后，点击对应平台按钮生成订阅：</p>
+                <ul className="mt-1 ml-4 space-y-1 text-xs list-disc">
+                  <li><span className="text-cyan-300">IOS SR订阅</span>：适用于 Shadowrocket，# 替换为 ?remarks=，socks5→socks，中间内容 Base64 编码</li>
+                  <li><span className="text-cyan-300">安卓 Neko订阅</span>：适用于 NekoBox，端口后加 /，原始文本存储</li>
+                </ul>
+              </div>
+              <div>
+                <h3 className="text-cyan-400 font-medium mb-1">4. 使用二维码</h3>
+                <p>生成订阅后自动显示二维码，在对应 APP 中扫描即可导入。订阅链接固定不变，更新后覆盖历史文件。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Row 2: Node List (full width) */}
+        <div className="bg-slate-900/50 border border-cyan-900/20 rounded-lg backdrop-blur-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-cyan-900/20 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-cyan-300 tracking-wide uppercase">
+              节点列表
+              <span className="text-slate-500 font-normal ml-2">({nodes.length} 个节点)</span>
+            </h2>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={toggleSelectAll}
+                className="text-xs text-slate-400 hover:text-cyan-300 transition-colors"
+              >
+                {selectedIds.size === nodes.length ? '取消全选' : '全选'}
+              </button>
+              <span className="text-xs text-cyan-400">{selectedIds.size > 0 ? `已选 ${selectedIds.size} 个` : ''}</span>
+            </div>
+          </div>
+
+          {nodes.length === 0 ? (
+            <div className="px-5 py-12 text-center text-slate-600 text-sm">
+              暂无节点，请添加或智能导入
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="border-b border-cyan-900/30 text-xs text-slate-500 uppercase tracking-wider">
+                    <th className="px-3 py-2.5 text-center w-10">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.size === nodes.length && nodes.length > 0}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 rounded border-cyan-700 bg-slate-800 accent-cyan-500 cursor-pointer"
+                      />
+                    </th>
+                    <th className="px-3 py-2.5 w-10">排序</th>
+                    <th className="px-3 py-2.5">协议</th>
+                    <th className="px-3 py-2.5">名称</th>
+                    <th className="px-3 py-2.5">地址</th>
+                    <th className="px-3 py-2.5">端口</th>
+                    <th className="px-3 py-2.5">账号</th>
+                    <th className="px-3 py-2.5">密码</th>
+                    <th className="px-3 py-2.5">到期</th>
+                    <th className="px-3 py-2.5 text-center">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
                   <DndContext
                     sensors={sensors}
                     collisionDetection={closestCenter}
                     onDragEnd={handleDragEnd}
                   >
                     <SortableContext
-                      items={nodes.map((n) => n.id)}
+                      items={nodes.map(n => n.id)}
                       strategy={verticalListSortingStrategy}
                     >
-                      <div className="space-y-2">
-                        {nodes.map((node) => (
-                          <SortableNodeItem
-                            key={node.id}
-                            node={node}
-                            isSelected={selectedIds.has(node.id)}
-                            onToggleSelect={handleToggleSelect}
-                            onDelete={handleDelete}
-                          />
-                        ))}
-                      </div>
+                      {nodes.map(node => (
+                        <SortableRow
+                          key={node.id}
+                          node={node}
+                          selected={selectedIds.has(node.id)}
+                          onToggleSelect={toggleSelect}
+                          onDelete={handleDelete}
+                        />
+                      ))}
                     </SortableContext>
                   </DndContext>
-                )}
-              </div>
-
-              {/* Generate Button */}
-              {nodes.length > 0 && (
-                <div className="px-4 pb-4">
-                  <button
-                    onClick={handleGenerate}
-                    disabled={loading || selectedIds.size === 0}
-                    className="w-full py-3 rounded-xl font-medium text-sm transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-500/15 text-cyan-400 border border-cyan-500/25 hover:bg-cyan-500/25 hover:border-cyan-500/40 hover:shadow-lg hover:shadow-cyan-500/10"
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        生成中...
-                      </>
-                    ) : (
-                      <>
-                        <QrCode className="w-4 h-4" />
-                        生成订阅 ({selectedIds.size} 个节点)
-                      </>
-                    )}
-                  </button>
-                </div>
-              )}
+                </tbody>
+              </table>
             </div>
+          )}
+        </div>
+
+        {/* Row 3: Generate Buttons + QR Code */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Generate Buttons */}
+          <div className="bg-slate-900/50 border border-cyan-900/20 rounded-lg p-5 backdrop-blur-sm">
+            <h2 className="text-sm font-semibold text-cyan-300 tracking-wide uppercase mb-4">生成订阅</h2>
+            <div className="grid grid-cols-2 gap-4">
+              <button
+                onClick={() => handleGenerate('ios')}
+                disabled={generating !== null || selectedIds.size === 0}
+                className="py-3 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:opacity-40 disabled:hover:from-cyan-600 disabled:hover:to-blue-600 text-white text-sm font-medium transition-all"
+              >
+                {generating === 'ios' ? '生成中...' : 'IOS SR 订阅'}
+              </button>
+              <button
+                onClick={() => handleGenerate('android')}
+                disabled={generating !== null || selectedIds.size === 0}
+                className="py-3 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 disabled:hover:from-emerald-600 disabled:hover:to-teal-600 text-white text-sm font-medium transition-all"
+              >
+                {generating === 'android' ? '生成中...' : '安卓 Neko 订阅'}
+              </button>
+            </div>
+            {selectedIds.size === 0 && (
+              <p className="mt-3 text-xs text-slate-600 text-center">请先在列表中勾选节点</p>
+            )}
           </div>
 
-          {/* Right Column: Results */}
-          <div className="space-y-4">
-            {!result ? (
-              <div className="rounded-xl border border-dashed border-slate-700/50 bg-slate-900/30 backdrop-blur-sm p-12 text-center">
-                <QrCode className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-                <p className="text-slate-500 text-sm">
-                  选择节点后点击生成，结果将在此展示
-                </p>
-              </div>
-            ) : (
-              <>
-                {/* Node URIs */}
-                <div className="rounded-xl border border-cyan-500/10 bg-slate-900/60 backdrop-blur-sm overflow-hidden">
-                  <div className="px-4 py-3 border-b border-cyan-500/10 flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                      <Link className="w-4 h-4 text-cyan-400" />
-                      节点链接
-                    </h3>
-                    <CopyButton text={result.uris.join('\n')} />
-                  </div>
-                  <div className="p-4 space-y-2 max-h-48 overflow-y-auto">
-                    {result.uris.map((uri, i) => (
-                      <div key={i} className="text-xs font-mono text-slate-400 bg-slate-800/50 p-2.5 rounded-lg break-all">
-                        {uri}
-                      </div>
-                    ))}
-                  </div>
+          {/* QR Code Result */}
+          <div className="bg-slate-900/50 border border-cyan-900/20 rounded-lg p-5 backdrop-blur-sm">
+            <h2 className="text-sm font-semibold text-cyan-300 tracking-wide uppercase mb-4">订阅二维码</h2>
+            {qrResult ? (
+              <div className="flex flex-col items-center gap-3">
+                <div className="bg-white p-3 rounded-lg animate-in fade-in duration-300">
+                  <QRCodeSVG
+                    value={qrResult.url}
+                    size={180}
+                    level="M"
+                    includeMargin={false}
+                  />
                 </div>
-
-                {/* Base64 */}
-                <div className="rounded-xl border border-cyan-500/10 bg-slate-900/60 backdrop-blur-sm overflow-hidden">
-                  <div className="px-4 py-3 border-b border-cyan-500/10 flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-cyan-400" />
-                      Base64 编码结果
-                    </h3>
-                    <CopyButton text={result.base64} />
+                <div className="w-full space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500 shrink-0">平台：</span>
+                    <span className={`text-xs font-medium ${qrResult.platform === 'ios' ? 'text-cyan-400' : 'text-emerald-400'}`}>
+                      {qrResult.platform === 'ios' ? 'IOS Shadowrocket' : '安卓 NekoBox'}
+                    </span>
                   </div>
-                  <div className="p-4">
-                    <div className="text-xs font-mono text-slate-400 bg-slate-800/50 p-2.5 rounded-lg break-all max-h-36 overflow-y-auto">
-                      {result.base64}
-                    </div>
-                  </div>
-                </div>
-
-                {/* File URL */}
-                <div className="rounded-xl border border-cyan-500/10 bg-slate-900/60 backdrop-blur-sm overflow-hidden">
-                  <div className="px-4 py-3 border-b border-cyan-500/10 flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                      <Globe className="w-4 h-4 text-cyan-400" />
-                      订阅文件路径
-                    </h3>
-                    <CopyButton text={result.fullUrl} />
-                  </div>
-                  <div className="p-4">
-                    <div className="text-sm font-mono text-cyan-400 bg-slate-800/50 p-3 rounded-lg break-all">
-                      {result.fullUrl}
-                    </div>
-                    <p className="text-xs text-slate-500 mt-2">可在客户端中使用此链接作为订阅地址</p>
-                  </div>
-                </div>
-
-                {/* QR Code */}
-                <div className="rounded-xl border border-cyan-500/10 bg-slate-900/60 backdrop-blur-sm overflow-hidden">
-                  <div className="px-4 py-3 border-b border-cyan-500/10 flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                      <QrCode className="w-4 h-4 text-cyan-400" />
-                      二维码
-                    </h3>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500 shrink-0">链接：</span>
+                    <span className="text-xs font-mono text-slate-300 break-all flex-1">{qrResult.url}</span>
                     <button
-                      onClick={() => setResult(null)}
-                      className="text-xs text-slate-500 hover:text-slate-400 transition-colors flex items-center gap-1"
+                      onClick={() => copyToClipboard(qrResult.url, '链接')}
+                      className={`shrink-0 text-xs px-2 py-1 rounded transition-colors ${
+                        copyFeedback === '链接'
+                          ? 'bg-emerald-900/50 text-emerald-300'
+                          : 'bg-slate-800 text-slate-400 hover:text-cyan-300'
+                      }`}
                     >
-                      <X className="w-3 h-3" /> 关闭
+                      {copyFeedback === '链接' ? '已复制' : '复制'}
                     </button>
                   </div>
-                  <div className="p-6 flex flex-col items-center gap-4">
-                    <div className="bg-white p-4 rounded-xl shadow-lg shadow-cyan-500/5">
-                      <QRCodeSVG
-                        value={result.fullUrl}
-                        size={200}
-                        level="M"
-                        bgColor="#ffffff"
-                        fgColor="#0a0f1a"
-                      />
-                    </div>
-                    <p className="text-xs text-slate-500 text-center">扫描二维码获取订阅文件地址</p>
-                  </div>
                 </div>
-              </>
-            )}
-
-            {error && (
-              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-                {error}
+              </div>
+            ) : (
+              <div className="text-center text-slate-600 text-sm py-8">
+                选择节点并点击生成按钮后，二维码将在此显示
               </div>
             )}
           </div>
         </div>
-
-        <footer className="mt-12 text-center text-xs text-slate-600">
-          VPN 节点配置工具 - 仅用于合法用途
-        </footer>
-      </div>
+      </main>
     </div>
   );
 }
