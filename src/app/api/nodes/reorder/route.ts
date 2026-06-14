@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
-import { getAuthenticatedUser } from '@/lib/auth-helper';
 
-// POST /api/nodes/reorder
+export const dynamic = 'force-dynamic';
+import { getAuthenticatedUser } from '@/lib/auth-helper';
+import { query } from '@/storage/database/pg-client';
+
 export async function POST(request: NextRequest) {
   try {
     const { user, error: authError, status } = await getAuthenticatedUser(request);
-    if (authError) {
+    if (authError || !user) {
       return NextResponse.json({ error: authError }, { status });
     }
 
@@ -17,18 +18,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '缺少排序数据' }, { status: 400 });
     }
 
-    const client = getSupabaseClient();
-
     for (const item of items) {
-      const { error } = await client
-        .from('vpn_nodes')
-        .update({ sort_order: item.sort_order })
-        .eq('id', item.id)
-        .eq('user_id', user!.id);
-
-      if (error) {
-        throw new Error(`更新排序失败: ${error.message}`);
-      }
+      await query(
+        'update vpn_nodes set sort_order = $1, updated_at = now() where id = $2 and user_id = $3',
+        [item.sort_order, item.id, user.id]
+      );
     }
 
     return NextResponse.json({ success: true });

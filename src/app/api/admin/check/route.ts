@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
 import { getAdminUser } from '@/lib/auth-helper';
 
 export async function GET(req: NextRequest) {

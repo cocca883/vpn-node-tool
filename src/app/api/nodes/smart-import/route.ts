@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
 import { getAuthenticatedUser } from '@/lib/auth-helper';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { query } from '@/storage/database/pg-client';
 
 interface ParsedNode {
   protocol: string;
@@ -224,7 +226,7 @@ function parseDelimited(line: string, delimiter: string): ParsedNode | null {
 export async function POST(request: NextRequest) {
   try {
     const { user, error: authError, status } = await getAuthenticatedUser(request);
-    if (authError) {
+    if (authError || !user) {
       return NextResponse.json({ error: authError }, { status });
     }
 
@@ -250,46 +252,50 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '未能识别到有效的节点数据，请检查格式' }, { status: 400 });
     }
 
-    // Batch insert into database
-    const client = getSupabaseClient();
+    const maxSort = await query<{ sort_order: number }>(
+      `
+        select sort_order
+        from vpn_nodes
+        where user_id = $1
+        order by sort_order desc
+        limit 1
+      `,
+      [user.id]
+    );
 
-    // Get max sort_order for this user
-    const { data: maxSortData } = await client
-      .from('vpn_nodes')
-      .select('sort_order')
-      .eq('user_id', user!.id)
-      .order('sort_order', { ascending: false })
-      .limit(1);
+    let nextSort = maxSort.rows[0] ? maxSort.rows[0].sort_order + 1 : 0;
+    const data = [];
 
-    let nextSort = (maxSortData && maxSortData.length > 0) ? maxSortData[0].sort_order + 1 : 0;
-
-    const insertData = parsedNodes.map(node => ({
-      protocol: node.protocol,
-      address: node.address,
-      port: node.port,
-      account: node.account || '',
-      password: node.password || '',
-      node_name: node.nodeName,
-      encryption: node.encryption || '',
-      network: node.network || 'tcp',
-      tls: node.tls || '',
-      sni: node.sni || '',
-      path: node.path || '',
-      host: node.host || '',
-      alter_id: 0,
-      expiry_date: node.expiryDate || '',
-      region: node.region || '',
-      user_id: user!.id,
-      sort_order: nextSort++,
-    }));
-
-    const { data, error } = await client
-      .from('vpn_nodes')
-      .insert(insertData)
-      .select();
-
-    if (error) {
-      throw new Error(`批量导入失败: ${error.message}`);
+    for (const node of parsedNodes) {
+      const inserted = await query(
+        `
+          insert into vpn_nodes (
+            protocol, address, port, account, password, node_name, encryption,
+            network, tls, sni, path, host, alter_id, expiry_date, region, user_id, sort_order
+          )
+          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 0, $13, $14, $15, $16)
+          returning *
+        `,
+        [
+          node.protocol,
+          node.address,
+          node.port,
+          node.account || '',
+          node.password || '',
+          node.nodeName,
+          node.encryption || '',
+          node.network || 'tcp',
+          node.tls || '',
+          node.sni || '',
+          node.path || '',
+          node.host || '',
+          node.expiryDate || '',
+          node.region || '',
+          user.id,
+          nextSort++,
+        ]
+      );
+      data.push(inserted.rows[0]);
     }
 
     return NextResponse.json({

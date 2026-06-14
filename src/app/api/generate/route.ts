@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseClient } from '@/storage/database/supabase-client';
+
+export const dynamic = 'force-dynamic';
 import { getAuthenticatedUser } from '@/lib/auth-helper';
+import { query } from '@/storage/database/pg-client';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -139,7 +141,7 @@ function buildIosUri(node: DbNode): string {
 export async function POST(request: NextRequest) {
   try {
     const { user, error: authError, status } = await getAuthenticatedUser(request);
-    if (authError) {
+    if (authError || !user) {
       return NextResponse.json({ error: authError }, { status });
     }
 
@@ -154,20 +156,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '请指定平台类型' }, { status: 400 });
     }
 
-    const client = getSupabaseClient();
-
-    // Fetch selected nodes for this user
-    const { data: nodes, error: fetchError } = await client
-      .from('vpn_nodes')
-      .select('*')
-      .in('id', nodeIds)
-      .eq('user_id', user!.id)
-      .order('sort_order', { ascending: true })
-      .order('id', { ascending: true });
-
-    if (fetchError) {
-      throw new Error(`查询节点失败: ${fetchError.message}`);
-    }
+    const nodeResult = await query(
+      `
+        select *
+        from vpn_nodes
+        where id = any($1::int[])
+          and user_id = $2
+        order by sort_order asc, id asc
+      `,
+      [nodeIds, user.id]
+    );
+    const nodes = nodeResult.rows;
 
     if (!nodes || nodes.length === 0) {
       return NextResponse.json({ error: '未找到选中的节点' }, { status: 404 });
@@ -193,14 +192,17 @@ export async function POST(request: NextRequest) {
       sort_order: n.sort_order as number,
     }));
 
-    // Read system config for filenames
-    const { data: configData } = await client
-      .from('system_config')
-      .select('key, value')
-      .in('key', ['android_filename', 'ios_filename', 'ios_rename_hash', 'ios_socks_prefix', 'android_port_suffix']);
+    const configResult = await query<{ key: string; value: string }>(
+      `
+        select key, value
+        from system_config
+        where key = any($1::text[])
+      `,
+      [['android_filename', 'ios_filename', 'ios_rename_hash', 'ios_socks_prefix', 'android_port_suffix']]
+    );
 
     const configMap: Record<string, string> = {};
-    for (const row of (configData || [])) {
+    for (const row of configResult.rows) {
       configMap[row.key] = row.value;
     }
 
